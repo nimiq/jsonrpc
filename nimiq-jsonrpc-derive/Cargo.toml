@@ -1,0 +1,16 @@
+[package]
+name = "nimiq-jsonrpc-derive"
+version = "0.1.0"
+authors = ["Janosch Gräf <janosch@nimiq.com>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+darling = "0.10"
+syn = "1.0"
+quote = "1.0"
+nimiq-jsonrpc-core = { path = "../nimiq-jsonrpc-core" }
+nimiq-jsonrpc-server = { path = "../nimiq-jsonrpc-server" }
+
