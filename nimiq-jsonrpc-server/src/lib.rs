@@ -31,10 +31,19 @@ pub enum Error {
 }
 
 
+#[derive(Clone, Debug)]
 pub struct Config {
-    bind_to: SocketAddr,
+    pub bind_to: SocketAddr,
 
     // TODO: cors header, allowed methods
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            bind_to: ([127, 0, 0, 1], 8000).into()
+        }
+    }
 }
 
 
@@ -64,13 +73,14 @@ impl<D: Dispatcher> Server<D> {
     pub async fn run(&self) {
         // Route to use JSON-RPC over websocket
         let inner = Arc::clone(&self.inner);
-        let ws_route = warp::path("/ws")
+        let ws_route = warp::path("ws")
+            .and(warp::path::end())
             .and(warp::ws())
             .map(move |ws| Self::upgrade_to_ws(Arc::clone(&inner), ws));
 
         // Route for backwards-compatiblity to use JSON-RPC over HTTP at /
         let inner = Arc::clone(&self.inner);
-        let post_route = warp::path("/")
+        let post_route = warp::path::end()
             .and(warp::post())
             .and(warp::body::bytes())
             .and_then(move |body: Bytes| {
@@ -171,41 +181,75 @@ impl<D: Dispatcher> Server<D> {
 
 
 #[async_trait]
-    pub trait Dispatcher: Send + Sync + 'static {
+pub trait Dispatcher: Send + Sync + 'static {
     async fn dispatch(&mut self, request: Request) -> Option<Response>;
+}
 
-    async fn dispatch_method_with_params<P, R, F, Fut>(request: Request, f: F) -> Option<Response>
-        where P: for<'de> Deserialize<'de> + Send,
-              R: Serialize,
-              F: FnOnce(P) -> Fut + Send,
-              Fut: Future<Output=R> + Send
-    {
-        let params = match request.params {
-            Some(params) => params,
-            None => return Self::error_response(request.id, JsonRpcError::invalid_params),
-        };
 
-        let params = match serde_json::from_value(params) {
-            Ok(params) => params,
-            Err(_e) => return Self::error_response(request.id, JsonRpcError::invalid_params),
-        };
 
-        let retval = f(params).await;
+pub async fn dispatch_method_with_args<P, R, E, F, Fut>(request: Request, f: F) -> Option<Response>
+    where P: for<'de> Deserialize<'de> + Send,
+          R: Serialize,
+          JsonRpcError: From<E>,
+          F: FnOnce(P) -> Fut + Send,
+          Fut: Future<Output=Result<R, E>> + Send
+{
+    let params = match request.params {
+        Some(params) => params,
+        None => return error_response(request.id, JsonRpcError::invalid_params),
+    };
 
-        if let Some(id) = request.id {
-            let retval = serde_json::to_value(retval).expect("Failed to serialize return value");
-            return Some(nimiq_jsonrpc_core::Response::new_success(id, retval));
-        }
+    let params = match serde_json::from_value(params) {
+        Ok(params) => params,
+        Err(_e) => return error_response(request.id, JsonRpcError::invalid_params),
+    };
 
-        None
+    let result = f(params).await;
+
+    response(request.id, result)
+}
+
+pub async fn dispatch_method_without_args<R, E, F, Fut>(request: Request, f: F) -> Option<Response>
+    where R: Serialize,
+          JsonRpcError: From<E>,
+          F: FnOnce() -> Fut + Send,
+          Fut: Future<Output=Result<R, E>> + Send
+{
+    let result = f().await;
+
+    match request.params {
+        Some(Value::Null) | None => {},
+        _ => return error_response(request.id, JsonRpcError::invalid_params),
     }
 
-    fn error_response<E: FnOnce() -> JsonRpcError>(id_opt: Option<Value>, e: E) -> Option<Response> {
-        if let Some(id) = id_opt {
-            Some(Response::new_error(id, e()))
-        }
-        else {
-            None
-        }
+    response(request.id, result)
+}
+
+fn response<R, E>(id_opt: Option<Value>, result: Result<R, E>) -> Option<Response>
+    where R: Serialize,
+          JsonRpcError: From<E>,
+{
+    let response = match (id_opt, result) {
+        (Some(id), Ok(retval)) => {
+            let retval = serde_json::to_value(retval).expect("Failed to serialize return value");
+            Some(Response::new_success(id, retval))
+        },
+        (Some(id), Err(e)) => {
+            Some(Response::new_error(id, JsonRpcError::from(e)))
+        },
+        (None, _) => None,
+    };
+
+    log::debug!("Sending response: {:?}", response);
+
+    response
+}
+
+pub fn error_response<E: FnOnce() -> JsonRpcError>(id_opt: Option<Value>, e: E) -> Option<Response> {
+    if let Some(id) = id_opt {
+        Some(Response::new_error(id, e()))
+    }
+    else {
+        None
     }
 }

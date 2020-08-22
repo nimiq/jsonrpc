@@ -136,3 +136,9 @@ impl Error {
         Self::new_reserved(-32603, "Internal error")
     }
 }
+
+impl From<()> for Error {
+    fn from(_: ()) -> Self {
+        Error::internal_error()
+    }
+}

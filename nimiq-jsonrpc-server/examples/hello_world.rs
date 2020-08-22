@@ -1,105 +1,65 @@
-// Example trait and implementation
 use async_trait::async_trait;
-use nimiq_jsonrpc_core::Request;
+use serde::{Serialize, Deserialize};
 
-#[derive(Serialize, Deserialize)]
+use nimiq_jsonrpc_server::{Server, Config};
+use nimiq_jsonrpc_client::http::HttpClient;
+
+
+#[derive(Debug, Serialize, Deserialize)]
 struct Goodbye {
     a: u32,
 }
 
+
+#[nimiq_jsonrpc_derive::proxy]
 #[async_trait]
-pub trait Foobar {
-    async fn hello(&self, name: String) -> String;
-    async fn bye(&self) -> Goodbye;
+trait Foobar {
+    async fn hello(&mut self, name: String) -> String;
+    async fn bye(&mut self) -> Goodbye;
+    //async fn may_fail(&self) -> Result<String, ()>;
 }
 
-#[derive(Dispatcher)]
-#[jsonrpc(trait="Foobar")]
 struct FoobarService;
 
+#[nimiq_jsonrpc_derive::service]
+#[async_trait]
 impl Foobar for FoobarService {
-    async fn hello(&self, name: String) -> String {
+    async fn hello(&mut self, name: String) -> String {
+        println!("Hello, {}", name);
         format!("Hello, {}", name)
     }
 
-    async fn bye(&self) -> Goodbye {
+    async fn bye(&mut self) -> Goodbye {
         Goodbye { a: 42 }
     }
+
+    //#[jsonrpc(result)]
+    /*async fn may_fail(&self) -> Result<String, ()> {
+        // This will respond with a non-descriptive internal error
+        Err(())
+    }*/
 }
 
 
-#[derive(Proxy)]
-#[jsonrpc(trait="Foobar", client="client")]
-struct FoobarProxy {
-    client: (),
-}
 
 
+#[tokio::main]
+async fn main() {
+    dotenv::dotenv().ok();
+    pretty_env_logger::init();
 
-mod example_derived {
-    #[derive(Serialize, Deserialize)]
-    struct FoobarServiceHelloMethodParams {
-        name: String,
-    }
+    let config = Config::default();
 
-    impl<T: Foobar> nimiq_jsonrpc_core::Dispatcher for T {
-        async fn dispatch(&mut self, request: nimiq_jsonrpc_core::Request) -> Option<nimiq_jsonrpc_core::Response> {
-            match request.method.as_str() {
-                "hello" => {
-                    return nimiq_jsonrpc_core::Dispatcher::dispatch_method_with_params(
-                        request,
-                        |params: FoobarServiceHelloMethodParams| super::Foobar::hello(self, params.name)
-                    );
-                },
+    log::info!("Listening on: {}", config.bind_to);
 
-                "bye" => {
-                    return nimiq_jsonrpc_core::Dispatcher::dispatch_method_without_params(
-                        request,
-                        || super::Foobar::bye(self)
-                    );
-                }
+    let server = Server::new(config, FoobarService);
+    tokio::spawn(async move {
+        server.run().await;
+    });
 
-                // ...
+    let client = HttpClient::new("http://localhost:8000/");
+    let mut proxy = FoobarProxy::new(client);
 
-                _ => {
-                    return nimiq_jsonrpc_core::Dispatcher::error_response(request.id, nimiq_jsonrpc_core::Error::method_not_found())
-                }
-            }
-
-            None
-        }
-    }
-
-    impl Proxy for FoobarProxy {
-        async fn call_remote<P, R>(&self, method: &str, params: P) -> Result<R, ProxyError>
-            where P: Serialize,
-                  R: for<'de> Deserialize<'de>,
-        {
-            // Field name specified in attribute
-            let client = self.client;
-
-            let request = nimiq_jsonrpc_core::Request::new(method.to_onwed(), params);
-
-            response: nimiq_jsonrpc_core::Response = client.call_remote(request).await?;
-
-            match response {
-                nimiq_jsonrpc_core::Response { result: Some(result), .. } => {
-                    let value = serde_json::from_value(result)?;
-                    Ok(value)
-                },
-                nimiq_jsonrpc_core::Response { error: Some(error), .. } => {
-                    Err(error)
-                },
-                _ => panic!("Invalid response: {:?}", response),
-            }
-        }
-    }
-
-    impl Foobar for FoobarProxy {
-        fn hello(name: String) -> String {
-            let params = FoobarServiceHelloMethodParams {
-                name
-            };
-        }
-    }
+    let retval = proxy.hello("World".to_owned()).await;
+    log::info!("RPC call returned: {}", retval);
 }

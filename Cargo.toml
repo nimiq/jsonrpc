@@ -1,7 +1,7 @@
 [workspace]
 members = [
 	"nimiq-jsonrpc-server",
-	#"nimiq-jsonrpc-derive",
+	"nimiq-jsonrpc-derive",
 	"nimiq-jsonrpc-client",
 	"nimiq-jsonrpc-core",
 ]
