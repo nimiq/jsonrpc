@@ -65,7 +65,15 @@ fn impl_service(im: &ItemImpl, _args: &ServiceMeta) -> TokenStream {
             async fn dispatch(&mut self, request: ::nimiq_jsonrpc_core::Request) -> Option<::nimiq_jsonrpc_core::Response> {
                 match request.method.as_str() {
                     #(#match_arms)*
-                    _ => ::nimiq_jsonrpc_server::error_response(request.id, || ::nimiq_jsonrpc_core::Error::method_not_found())
+
+                    _ => {
+                        let ::nimiq_jsonrpc_core::Request { id, method, .. } = request;
+
+                        ::nimiq_jsonrpc_server::error_response(
+                            id,
+                            || ::nimiq_jsonrpc_core::RpcError::method_not_found(Some(format!("Method does not exist: {}", method)))
+                        )
+                    }
                 }
             }
         }

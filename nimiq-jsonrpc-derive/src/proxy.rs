@@ -84,6 +84,8 @@ fn impl_service(tr: &ItemTrait, args: &ProxyMeta) -> TokenStream {
         impl<C> #trait_ident for #struct_ident<C>
             where C: ::nimiq_jsonrpc_client::Client + ::std::marker::Send + ::std::marker::Sync
         {
+            type Error = C::Error;
+
             #(#method_impls)*
         }
     }

@@ -1,7 +1,7 @@
 mod service;
 mod proxy;
 
-use syn::{FnArg, Pat, Ident, Type, ReturnType, Signature};
+use syn::{FnArg, Pat, Ident, Type, Signature};
 use quote::{quote, format_ident};
 
 use service::service_macro;
@@ -22,7 +22,6 @@ pub fn proxy(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> p
 
 pub(crate) struct RpcMethod<'a> {
     signature: &'a Signature,
-    return_ty: TokenStream,
     args: Vec<(&'a Ident, &'a Type)>,
     method_name_literal: Literal,
     args_struct_ident: Ident,
@@ -31,12 +30,6 @@ pub(crate) struct RpcMethod<'a> {
 
 impl<'a> RpcMethod<'a> {
     pub fn new(signature: &'a Signature, args_struct_prefix: &'a str) -> Self {
-        let return_ty = match &signature.output {
-            ReturnType::Default => quote! { () },
-            ReturnType::Type(_, ty) => quote! { #ty },
-        };
-        //println!("return_ty = {:?}", return_ty);
-
         let mut has_self = false;
         let mut args = vec![];
 
@@ -64,7 +57,6 @@ impl<'a> RpcMethod<'a> {
 
         Self {
             signature,
-            return_ty,
             args,
             method_name_literal,
             args_struct_ident,
@@ -95,29 +87,29 @@ impl<'a> RpcMethod<'a> {
             .map(|(ident, _)| quote! { params.#ident })
             .collect::<Vec<TokenStream>>();
         let args_struct_ident = &self.args_struct_ident;
-        let return_ty = &self.return_ty;
         let method_ident = &self.signature.ident;
         let method_name_literal = &self.method_name_literal;
 
         if method_args.is_empty() {
-            quote! {
+            /*quote! {
                 #method_name_literal => {
                     return ::nimiq_jsonrpc_server::dispatch_method_without_args(
                         request,
                         || async {
-                            Ok::<#return_ty, ()>(self.#method_ident().await)
+                            Ok(self.#method_ident().await)
                         }
                     ).await
                 },
-            }
+            }*/
+            todo!()
         }
         else {
             quote! {
                 #method_name_literal => {
-                    return ::nimiq_jsonrpc_server::dispatch_method_with_args::<#args_struct_ident, #return_ty, (), _, _>(
+                    return ::nimiq_jsonrpc_server::dispatch_method_with_args(
                         request,
                         |params: #args_struct_ident| async {
-                            Ok::<#return_ty, ()>(self.#method_ident(#(#method_args),*).await)
+                            Ok::<_, ::nimiq_jsonrpc_core::RpcError>(self.#method_ident(#(#method_args),*).await?)
                         }
                     ).await
                 }
@@ -127,14 +119,14 @@ impl<'a> RpcMethod<'a> {
 
     pub fn generate_proxy_method(&self) -> TokenStream {
         let method_ident = &self.signature.ident;
-        let return_ty = &self.return_ty;
         let args_struct_ident = &self.args_struct_ident;
         let method_name_literal = &self.method_name_literal;
+        let output = &self.signature.output;
 
         if self.args.is_empty() {
             quote! {
-                async fn #method_ident(&mut self) -> #return_ty {
-                    self.client.call_method::<(), #return_ty>(
+                async fn #method_ident(&mut self) #output {
+                    self.client.send_request(
                         #method_name_literal,
                         &()
                     ).await
@@ -150,14 +142,29 @@ impl<'a> RpcMethod<'a> {
                 .map(|(ident, _)| quote! { #ident })
                 .collect::<Vec<TokenStream>>();
 
+            /*
+                Generates a method like:
+                ```rust
+                    async fn hello_word(&mut self, foo: String) -> Result<String, Self::Error> {
+                        let args = struct ProxyArgs_Foobar_hello_world {
+                            foo,
+                        };
+                        self.send_request(
+                            "hello_world",
+                            &args,
+                        )
+                    }
+                ```
+            */
+
             quote! {
-                async fn #method_ident(&mut self, #(#method_args),*) -> #return_ty {
+                async fn #method_ident(&mut self, #(#method_args),*) #output {
                     let args = #args_struct_ident {
                         #(#struct_fields),*
                     };
-                    self.client.call_method::<#args_struct_ident, #return_ty>(
+                    self.client.send_request(
                         #method_name_literal,
-                        &args
+                        &args,
                     ).await
                 }
             }

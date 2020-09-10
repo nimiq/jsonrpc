@@ -1,3 +1,10 @@
+//! This crate implements a JSON-RPC HTTP server using [warp](https://crates.io/crates/warp). It accepts POST requests
+//! at `/` and requests over websocket at `/ws`.
+
+#![warn(missing_docs)]
+#![warn(missing_doc_code_examples)]
+
+
 use std::{
     net::SocketAddr,
     sync::Arc,
@@ -19,29 +26,43 @@ use serde::{
 };
 use thiserror::Error;
 
-use nimiq_jsonrpc_core::{SingleOrBatch, Request, Response, Error as JsonRpcError};
+use nimiq_jsonrpc_core::{SingleOrBatch, Request, Response, RpcError};
 
 
+/// A server error.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// Error returned by warp
     #[error("HTTP error: {0}")]
     Warp(#[from] warp::Error),
+
+    /// Error from the message queues, that are used internally.
     #[error("Queue error: {0}")]
     Mpsc(#[from] tokio::sync::mpsc::error::SendError<warp::ws::Message>),
 }
 
 
+/// The server configuration
+///
+/// #TODO
+///
+/// - CORS header
+/// - allowed methods
+///
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// Bind server to specified hostname and port.
     pub bind_to: SocketAddr,
 
-    // TODO: cors header, allowed methods
+    /// Enable JSON-RPC over websocket at `/ws`.
+    pub enable_websocket: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            bind_to: ([127, 0, 0, 1], 8000).into()
+            bind_to: ([127, 0, 0, 1], 8000).into(),
+            enable_websocket: true,
         }
     }
 }
@@ -54,12 +75,20 @@ struct Inner<D: Dispatcher> {
 }
 
 
+/// A JSON-RPC server.
 pub struct Server<D: Dispatcher> {
     inner: Arc<Inner<D>>,
 }
 
 
 impl<D: Dispatcher> Server<D> {
+    /// Creates a new JSON-RPC server.
+    ///
+    /// # Arguments
+    ///
+    ///  - `config`: The server configuration.
+    ///  - `dispatcher`: The dispatcher that takes a request and executes the requested method. This can be derived
+    ///    using the `nimiq_jsonrpc_derive::service` macro.
     pub fn new(config: Config, dispatcher: D) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -70,6 +99,7 @@ impl<D: Dispatcher> Server<D> {
         }
     }
 
+    /// Runs the server forever.
     pub async fn run(&self) {
         // Route to use JSON-RPC over websocket
         let inner = Arc::clone(&self.inner);
@@ -104,6 +134,11 @@ impl<D: Dispatcher> Server<D> {
         warp::serve(routes).run(self.inner.config.bind_to.clone()).await;
     }
 
+    /// Upgrades a connection to websocket. This creates message queues and tasks to forward messages between them.
+    ///
+    /// We need a MPSC queue to be able to pass sender halves to called functions. The called functions then can keep
+    /// the sender for sending notifications to the client.
+    ///
     fn upgrade_to_ws(inner: Arc<Inner<D>>, ws: warp::ws::Ws) -> impl warp::Reply {
         ws.on_upgrade(move |websocket| {
             let (mut tx, mut rx) = websocket.split();
@@ -139,11 +174,24 @@ impl<D: Dispatcher> Server<D> {
         })
     }
 
+    /// Handles a raw request received as POST request, or websocket message.
+    ///
+    /// # Arguments
+    ///
+    ///  - `inner`: Server state
+    ///  - `request`: The raw request data.
+    ///  - `tx`: If the request was received over websocket, this the message queue over which the called function can
+    ///          send notifications to the client (used for subscriptions).
+    /// # TODO
+    ///
+    ///  - Only pass a borrow to `tx`, so the callee can clone it only if necessary.
+    ///
     async fn handle_raw_request(inner: Arc<Inner<D>>, request: &[u8], tx: Option<mpsc::Sender<warp::ws::Message>>) -> Option<Vec<u8>> {
         match serde_json::from_slice(request) {
             Ok(request) => Self::handle_request(inner, request, tx).await,
             Err(_e) => {
-                Some(SingleOrBatch::Single(Response::new_error(Value::Null, JsonRpcError::invalid_request())))
+                log::error!("Received invalid JSON from client");
+                Some(SingleOrBatch::Single(Response::new_error(Value::Null, RpcError::invalid_request(Some("Received invalid JSON".to_owned())))))
             }
         }.map(|response| {
             serde_json::to_vec(&response)
@@ -151,6 +199,19 @@ impl<D: Dispatcher> Server<D> {
         })
     }
 
+    /// Handles an JSON RPC request. This can either be a single or batch request.
+    ///
+    /// # Arguments
+    ///
+    ///  - `inner`: Server state
+    ///  - `request`: The request that was received.
+    ///  - `tx`: If the request was received over websocket, this the message queue over which the called function can
+    ///          send notifications to the client (used for subscriptions).
+    ///
+    /// # TODO
+    ///
+    ///  - Only pass a borrow to `tx`, so the callee can clone it only if necessary.
+    ///
     async fn handle_request(inner: Arc<Inner<D>>, request: SingleOrBatch<Request>, tx: Option<mpsc::Sender<warp::ws::Message>>) -> Option<SingleOrBatch<Response>> {
         match request {
             SingleOrBatch::Single(request) => {
@@ -172,36 +233,54 @@ impl<D: Dispatcher> Server<D> {
         }
     }
 
+    /// Handles a single JSON RPC request
+    ///
+    /// # TODO
+    ///
+    /// - Handle subscriptions
     async fn handle_single_request(inner: Arc<Inner<D>>, request: Request, _tx: Option<mpsc::Sender<warp::ws::Message>>) -> Option<Response> {
-        // TODO: Handle subscriptions
+
+
+
+
         let mut dispatcher = inner.dispatcher.write().await;
         dispatcher.dispatch(request).await
     }
 }
 
-
+/// A method dispatcher. These take a request and handle the method execution. Can be generated from an `impl` block
+/// using `nimiq_jsonrpc_derive::service`.
 #[async_trait]
 pub trait Dispatcher: Send + Sync + 'static {
+    /// Calls the requested method with the request parameters and returns it's return value (or error) as a resposne.
     async fn dispatch(&mut self, request: Request) -> Option<Response>;
 }
 
 
-
+/// Read the request and call a handler function if possible. This variant accepts calls with arguments.
+///
+/// This is a helper function used by implementations of `Dispatcher`.
+///
+/// # TODO
+///
+///  - Currently this always expects an object with named parameters. Do we want to accept a list too?
+///  - Merge with it's other variant, as a function call without arguments is just one with `()` as request parameter.
+///
 pub async fn dispatch_method_with_args<P, R, E, F, Fut>(request: Request, f: F) -> Option<Response>
     where P: for<'de> Deserialize<'de> + Send,
           R: Serialize,
-          JsonRpcError: From<E>,
+          RpcError: From<E>,
           F: FnOnce(P) -> Fut + Send,
           Fut: Future<Output=Result<R, E>> + Send
 {
     let params = match request.params {
         Some(params) => params,
-        None => return error_response(request.id, JsonRpcError::invalid_params),
+        None => return error_response(request.id, || RpcError::invalid_params(Some("Missing request parameters.".to_owned()))),
     };
 
     let params = match serde_json::from_value(params) {
         Ok(params) => params,
-        Err(_e) => return error_response(request.id, JsonRpcError::invalid_params),
+        Err(_e) => return error_response(request.id, || RpcError::invalid_params(Some("Expected an object for the request parameters.".to_owned()))),
     };
 
     let result = f(params).await;
@@ -209,9 +288,13 @@ pub async fn dispatch_method_with_args<P, R, E, F, Fut>(request: Request, f: F) 
     response(request.id, result)
 }
 
+/// Read the request and call a handler function if possible. This variant accepts calls without arguments.
+///
+/// This is a helper function used by implementations of `Dispatcher`.
+///
 pub async fn dispatch_method_without_args<R, E, F, Fut>(request: Request, f: F) -> Option<Response>
     where R: Serialize,
-          JsonRpcError: From<E>,
+          RpcError: From<E>,
           F: FnOnce() -> Fut + Send,
           Fut: Future<Output=Result<R, E>> + Send
 {
@@ -219,15 +302,18 @@ pub async fn dispatch_method_without_args<R, E, F, Fut>(request: Request, f: F) 
 
     match request.params {
         Some(Value::Null) | None => {},
-        _ => return error_response(request.id, JsonRpcError::invalid_params),
+        Some(Value::Array(a)) if a.is_empty() => {},
+        Some(Value::Object(o)) if o.is_empty() => {},
+        _ => return error_response(request.id, || RpcError::invalid_params(Some("Didn't expect any request parameters".to_owned()))),
     }
 
     response(request.id, result)
 }
 
+/// Constructs a [`Response`] if necessary (i.e., if the request ID was set).
 fn response<R, E>(id_opt: Option<Value>, result: Result<R, E>) -> Option<Response>
     where R: Serialize,
-          JsonRpcError: From<E>,
+          RpcError: From<E>,
 {
     let response = match (id_opt, result) {
         (Some(id), Ok(retval)) => {
@@ -235,7 +321,7 @@ fn response<R, E>(id_opt: Option<Value>, result: Result<R, E>) -> Option<Respons
             Some(Response::new_success(id, retval))
         },
         (Some(id), Err(e)) => {
-            Some(Response::new_error(id, JsonRpcError::from(e)))
+            Some(Response::new_error(id, RpcError::from(e)))
         },
         (None, _) => None,
     };
@@ -245,7 +331,17 @@ fn response<R, E>(id_opt: Option<Value>, result: Result<R, E>) -> Option<Respons
     response
 }
 
-pub fn error_response<E: FnOnce() -> JsonRpcError>(id_opt: Option<Value>, e: E) -> Option<Response> {
+/// Constructs an error response if necessary (i.e., if the request ID was set).
+///
+/// # Arguments
+///
+///  - `id_opt`: The ID field from the request.
+///  - `e`: A function that returns the error. This is only called, if we actually can respond with an error.
+///
+pub fn error_response<E>(id_opt: Option<Value>, e: E) -> Option<Response>
+    where
+        E: FnOnce() -> RpcError,
+{
     if let Some(id) = id_opt {
         Some(Response::new_error(id, e()))
     }

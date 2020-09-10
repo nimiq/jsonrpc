@@ -1,6 +1,6 @@
 # Nimiq JSON-RPC
 
-A Rust implementation of the JSON-RPC[1] protocol.
+A Rust implementation of the [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification#notification).
 
  - `nimiq-jsonrpc-core` implements the data structures (using [serde](https://crates.io/crates/serde)) for JSON-RPC.
  - `nimiq-jsonrpc-client` is a client implementation for a HTTP (using [reqwest](https://crates.io/crates/reqwest)) and websocket client (using [tokio-tungstenite](https://crates.io/crates/tokio-tungstenite)).
@@ -60,4 +60,5 @@ async fn main() {
 
  - Implement websocket client
  - Implement *PubSub*
+ - Documentation
 
