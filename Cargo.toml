@@ -4,5 +4,7 @@ members = [
 	"nimiq-jsonrpc-derive",
 	"nimiq-jsonrpc-client",
 	"nimiq-jsonrpc-core",
+
 	"examples/hello_world",
+	"examples/pubsub",
 ]

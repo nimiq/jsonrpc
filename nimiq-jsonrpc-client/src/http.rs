@@ -5,6 +5,7 @@ use serde::{
 use serde_json::Value;
 use async_trait::async_trait;
 use thiserror::Error;
+use futures::stream::BoxStream;
 
 use nimiq_jsonrpc_core::{Request, Response};
 
@@ -88,5 +89,9 @@ impl Client for HttpClient {
         else {
             Ok(response.into_result()?)
         }
+    }
+
+    fn connect_stream<T>(&mut self, _id: Value) -> BoxStream<'static, T> {
+        panic!("Streams are not supported by the HTTP client.");
     }
 }

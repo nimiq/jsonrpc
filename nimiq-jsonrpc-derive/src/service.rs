@@ -15,7 +15,7 @@ struct ServiceMeta {
 
 pub fn service_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let attr_args = parse_macro_input!(args as AttributeArgs);
-    let im = parse_macro_input!(input as ItemImpl);
+    let mut im = parse_macro_input!(input as ItemImpl);
 
     let args = match ServiceMeta::from_list(&attr_args) {
         Ok(v) => v,
@@ -24,7 +24,7 @@ pub fn service_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStre
 
     //println!("args: {:#?}", args);
 
-    let service_impl = impl_service(&im, &args);
+    let service_impl = impl_service(&mut im, &args);
 
     //println!("impl: {}", quote!{#im});
     //println!("service impl: {}", service_impl);
@@ -36,7 +36,7 @@ pub fn service_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStre
 }
 
 
-fn impl_service(im: &ItemImpl, _args: &ServiceMeta) -> TokenStream {
+fn impl_service(im: &mut ItemImpl, _args: &ServiceMeta) -> TokenStream {
     let mut args_structs = vec![];
     let mut match_arms = vec![];
 
@@ -48,12 +48,17 @@ fn impl_service(im: &ItemImpl, _args: &ServiceMeta) -> TokenStream {
     let struct_name = &struct_path.segments.last().unwrap().ident;
     let args_struct_prefix = format!("ServiceArgs_{}", struct_name);
 
-    for item in &im.items {
+    for item in &mut im.items {
         if let ImplItem::Method(method) = item {
-            let method = RpcMethod::new(&method.sig, &args_struct_prefix);
+            let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs);
+
+            let match_arm = method.generate_dispatcher_match_arm();
+
+            //println!("Generated match arm:");
+            //println!("{}", match_arm);
 
             args_structs.push(method.generate_args_struct());
-            match_arms.push(method.generate_dispatcher_match_arm());
+            match_arms.push(match_arm);
         }
     }
 
@@ -62,7 +67,12 @@ fn impl_service(im: &ItemImpl, _args: &ServiceMeta) -> TokenStream {
 
         #[::async_trait::async_trait]
         impl ::nimiq_jsonrpc_server::Dispatcher for #struct_path {
-            async fn dispatch(&mut self, request: ::nimiq_jsonrpc_core::Request) -> Option<::nimiq_jsonrpc_core::Response> {
+            async fn dispatch(
+                &mut self,
+                request: ::nimiq_jsonrpc_core::Request,
+                tx: Option<&::tokio::sync::mpsc::Sender<::std::vec::Vec<u8>>>,
+                stream_id: usize,
+            ) -> Option<::nimiq_jsonrpc_core::Response> {
                 match request.method.as_str() {
                     #(#match_arms)*
 

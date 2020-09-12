@@ -52,6 +52,9 @@ use serde::{
     de::Deserialize,
 };
 use async_trait::async_trait;
+use futures::stream::BoxStream;
+
+use nimiq_jsonrpc_core::SubscriptionId;
 
 
 #[async_trait]
@@ -81,5 +84,23 @@ pub trait Client {
     ///
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
         where P: Serialize + std::fmt::Debug + Send + Sync,
-              R: for<'de> Deserialize<'de> + std::fmt::Debug + Send + Sync;
+              R: for<'de> Deserialize<'de> + Debug + Send + Sync;
+
+    /// If the client supports streams (i.e. receiving notifications), this should return a stream for the specific
+    /// subscription ID.
+    ///
+    /// # Arguments
+    ///
+    ///  - `id`: The subscription ID
+    ///
+    /// # Returns
+    ///
+    /// Returns a stream of items of type `T` that are received as notifications with the specific subscription ID.
+    ///
+    /// # Panics
+    ///
+    /// If the client doesn't support receiving notifications, this method is allowed to panic.
+    ///
+    fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
+        where T: for<'de> Deserialize<'de> + Debug + Send + Sync;
 }

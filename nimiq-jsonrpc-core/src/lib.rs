@@ -9,6 +9,9 @@ pub const JSONRPC_VERSION: &'static str = "2.0";
 pub const JSONRPC_RESERVED_ERROR_CODES: RangeInclusive<i64> = -32768 ..= -32000;
 
 
+pub type SubscriptionId = Value;
+
+
 /// An error of this JSON-RPC implementation. This can be either an error object returned by the server, or
 /// any other error that might be triggered in the server or client (e.g. a network error).
 #[derive(Debug, Error)]
@@ -273,4 +276,10 @@ impl From<()> for RpcError {
     fn from(_: ()) -> Self {
         Self::default()
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubscriptionMessage<T> {
+    pub subscription: SubscriptionId,
+    pub result: T,
 }

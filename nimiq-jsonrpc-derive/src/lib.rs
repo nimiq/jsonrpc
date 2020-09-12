@@ -1,12 +1,12 @@
 mod service;
 mod proxy;
 
-use syn::{FnArg, Pat, Ident, Type, Signature};
+use syn::{FnArg, Pat, Ident, Type, Signature, Attribute};
 use quote::{quote, format_ident};
+use proc_macro2::{TokenStream, Literal};
 
 use service::service_macro;
 use proxy::proxy_macro;
-use proc_macro2::{TokenStream, Literal};
 
 
 #[proc_macro_attribute]
@@ -20,16 +20,41 @@ pub fn proxy(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> p
 }
 
 
+#[derive(Clone, Debug, Default)]
+struct MethodAttributes {
+    stream: Option<Attribute>,
+}
+
+impl MethodAttributes {
+    pub fn parse(input: &mut Vec<Attribute>) -> MethodAttributes {
+        let mut attrs = MethodAttributes::default();
+
+        input.retain(|attr: &Attribute| {
+            if attr.path.is_ident("stream") {
+                attrs.stream = Some(attr.clone());
+                false
+            }
+            else {
+                true
+            }
+        });
+
+        attrs
+    }
+}
+
+
 pub(crate) struct RpcMethod<'a> {
     signature: &'a Signature,
     args: Vec<(&'a Ident, &'a Type)>,
     method_name_literal: Literal,
     args_struct_ident: Ident,
+    attrs: MethodAttributes,
 }
 
 
 impl<'a> RpcMethod<'a> {
-    pub fn new(signature: &'a Signature, args_struct_prefix: &'a str) -> Self {
+    pub fn new(signature: &'a Signature, args_struct_prefix: &'a str, attrs: &'a mut Vec<Attribute>) -> Self {
         let mut has_self = false;
         let mut args = vec![];
 
@@ -38,12 +63,12 @@ impl<'a> RpcMethod<'a> {
                 FnArg::Receiver(_) => {
                     has_self = true;
                 },
-                FnArg::Typed(arg) => {
-                    let ident = match &*arg.pat {
+                FnArg::Typed(pat_type) => {
+                    let ident = match &*pat_type.pat {
                         Pat::Ident(ty) => &ty.ident,
                         _ => panic!("Arguments must not be patterns."),
                     };
-                    args.push((ident, &*arg.ty));
+                    args.push((ident, &*pat_type.ty));
                 },
             }
         }
@@ -51,6 +76,9 @@ impl<'a> RpcMethod<'a> {
         if !has_self {
             panic!("Method signature doesn't take self");
         }
+
+        let attrs = MethodAttributes::parse(attrs);
+        //println!("Method attributes: {:?}", attrs);
 
         let method_name_literal = Literal::string(&signature.ident.to_string());
         let args_struct_ident = format_ident!("{}_{}", args_struct_prefix, signature.ident);
@@ -60,6 +88,7 @@ impl<'a> RpcMethod<'a> {
             args,
             method_name_literal,
             args_struct_ident,
+            attrs,
         }
     }
 
@@ -83,32 +112,46 @@ impl<'a> RpcMethod<'a> {
     }
 
     pub fn generate_dispatcher_match_arm(&self) -> TokenStream {
-        let method_args = self.args.iter()
+        let method_args = self.args
+            .iter()
             .map(|(ident, _)| quote! { params.#ident })
             .collect::<Vec<TokenStream>>();
         let args_struct_ident = &self.args_struct_ident;
         let method_ident = &self.signature.ident;
         let method_name_literal = &self.method_name_literal;
 
-        if method_args.is_empty() {
-            /*quote! {
+        if self.attrs.stream.is_some() {
+            quote! {
                 #method_name_literal => {
-                    return ::nimiq_jsonrpc_server::dispatch_method_without_args(
-                        request,
-                        || async {
-                            Ok(self.#method_ident().await)
-                        }
-                    ).await
-                },
-            }*/
-            todo!()
+                    if let Some(tx) = tx {
+                        return ::nimiq_jsonrpc_server::dispatch_method_with_args(
+                            request,
+                            move |params: #args_struct_ident| async move {
+                                let stream = self.#method_ident(#(#method_args),*).await?;
+
+                                // TODO: Take the method name from the attribute
+                                let subscription = ::nimiq_jsonrpc_server::connect_stream(stream, tx, stream_id, "subscription".to_owned());
+
+                                Ok::<_, ::nimiq_jsonrpc_core::RpcError>(subscription)
+                            }
+                        ).await
+                    }
+                    else {
+                        let ::nimiq_jsonrpc_core::Request { id, .. } = request;
+                            ::nimiq_jsonrpc_server::error_response(
+                            id,
+                            || ::nimiq_jsonrpc_core::RpcError::internal_error(Some("Client does not support streams".to_owned()))
+                        )
+                    }
+                }
+            }
         }
         else {
             quote! {
                 #method_name_literal => {
                     return ::nimiq_jsonrpc_server::dispatch_method_with_args(
                         request,
-                        |params: #args_struct_ident| async {
+                        move |params: #args_struct_ident| async move {
                             Ok::<_, ::nimiq_jsonrpc_core::RpcError>(self.#method_ident(#(#method_args),*).await?)
                         }
                     ).await
@@ -123,50 +166,37 @@ impl<'a> RpcMethod<'a> {
         let method_name_literal = &self.method_name_literal;
         let output = &self.signature.output;
 
-        if self.args.is_empty() {
+        let method_args = self.args.iter()
+            .map(|(ident, ty)| quote! { #ident: #ty })
+            .collect::<Vec<TokenStream>>();
+
+        let struct_fields = self.args.iter()
+            .map(|(ident, _)| quote! { #ident })
+            .collect::<Vec<TokenStream>>();
+
+
+        let transform_return_value = if self.attrs.stream.is_some() {
             quote! {
-                async fn #method_ident(&mut self) #output {
-                    self.client.send_request(
-                        #method_name_literal,
-                        &()
-                    ).await
-                }
+                let return_value = self.client.connect_stream(return_value);
             }
         }
         else {
-            let method_args = self.args.iter()
-                .map(|(ident, ty)| quote! { #ident: #ty })
-                .collect::<Vec<TokenStream>>();
+            quote! {}
+        };
 
-            let struct_fields = self.args.iter()
-                .map(|(ident, _)| quote! { #ident })
-                .collect::<Vec<TokenStream>>();
+        quote! {
+            async fn #method_ident(&mut self, #(#method_args),*) #output {
+                let args = #args_struct_ident {
+                    #(#struct_fields),*
+                };
+                let return_value = self.client.send_request(
+                    #method_name_literal,
+                    &args,
+                ).await?;
 
-            /*
-                Generates a method like:
-                ```rust
-                    async fn hello_word(&mut self, foo: String) -> Result<String, Self::Error> {
-                        let args = struct ProxyArgs_Foobar_hello_world {
-                            foo,
-                        };
-                        self.send_request(
-                            "hello_world",
-                            &args,
-                        )
-                    }
-                ```
-            */
+                #transform_return_value
 
-            quote! {
-                async fn #method_ident(&mut self, #(#method_args),*) #output {
-                    let args = #args_struct_ident {
-                        #(#struct_fields),*
-                    };
-                    self.client.send_request(
-                        #method_name_literal,
-                        &args,
-                    ).await
-                }
+                Ok(return_value)
             }
         }
     }

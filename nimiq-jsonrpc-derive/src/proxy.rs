@@ -16,7 +16,7 @@ struct ProxyMeta {
 
 pub fn proxy_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let attr_args = parse_macro_input!(args as AttributeArgs);
-    let tr = parse_macro_input!(input as ItemTrait);
+    let mut tr = parse_macro_input!(input as ItemTrait);
 
     let args = match ProxyMeta::from_list(&attr_args) {
         Ok(v) => v,
@@ -26,7 +26,7 @@ pub fn proxy_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStream
     //println!("args: {:#?}", args);
     //println!("trait: {}", quote!{#tr});
 
-    let proxy_impl = impl_service(&tr, &args);
+    let proxy_impl = impl_service(&mut tr, &args);
 
     //println!("proxy impl: {}", proxy_impl);
 
@@ -37,7 +37,7 @@ pub fn proxy_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStream
 }
 
 
-fn impl_service(tr: &ItemTrait, args: &ProxyMeta) -> TokenStream {
+fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
     let trait_ident = &tr.ident;
 
     let struct_ident = match &args.name {
@@ -52,12 +52,17 @@ fn impl_service(tr: &ItemTrait, args: &ProxyMeta) -> TokenStream {
     let mut args_structs = vec![];
     let mut method_impls = vec![];
 
-    for item in &tr.items {
+    for item in &mut tr.items {
         if let TraitItem::Method(method) = item {
-            let method = RpcMethod::new(&method.sig, &args_struct_prefix);
+            let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs);
+
+            let method_code = method.generate_proxy_method();
+
+            //println!("Generated proxy method:");
+            //println!("{}", method_code);
 
             args_structs.push(method.generate_args_struct());
-            method_impls.push(method.generate_proxy_method());
+            method_impls.push(method_code);
         }
     }
 
