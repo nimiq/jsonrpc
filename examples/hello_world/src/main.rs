@@ -80,7 +80,7 @@ async fn main() {
 
     // The server is running now, so we can connect to it. The `HttpClient` will send all requests as a HTTP POST to
     // the specified URL.
-    let client = HttpClient::new("http://localhost:8000/");
+    let client = HttpClient::new("http://localhost:8000/".parse().unwrap());
 
     // Next we can use the proxy that we generated earlier and construct it with the client.
     let mut proxy = HelloWorldProxy::new(client);

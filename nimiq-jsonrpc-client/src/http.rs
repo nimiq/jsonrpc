@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use serde::{
     ser::Serialize,
     de::Deserialize,
@@ -6,8 +8,9 @@ use serde_json::Value;
 use async_trait::async_trait;
 use thiserror::Error;
 use futures::stream::BoxStream;
+use url::Url;
 
-use nimiq_jsonrpc_core::{Request, Response};
+use nimiq_jsonrpc_core::{Request, Response, SubscriptionId};
 
 use crate::Client;
 
@@ -39,7 +42,7 @@ pub enum Error {
 pub struct HttpClient {
     next_id: usize,
     client: reqwest::Client,
-    url: String,
+    url: Url,
 }
 
 impl HttpClient {
@@ -49,11 +52,11 @@ impl HttpClient {
     ///
     ///  - `url`: The URL to which the requests are send.
     ///
-    pub fn new(url: &str) -> Self {
+    pub fn new(url: Url) -> Self {
         Self {
             next_id: 1,
             client: reqwest::Client::new(),
-            url: url.to_owned(),
+            url,
         }
     }
 }
@@ -63,8 +66,8 @@ impl Client for HttpClient {
     type Error = Error;
 
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Error>
-        where P: Serialize + std::fmt::Debug + Send + Sync,
-              R: for<'de> Deserialize<'de> + std::fmt::Debug + Send + Sync,
+        where P: Serialize + Debug + Send + Sync,
+              R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let request_id = self.next_id;
         self.next_id += 1;
@@ -74,7 +77,7 @@ impl Client for HttpClient {
 
         log::debug!("Sending request: {:?}", request);
 
-        let response: Response = self.client.post(&self.url)
+        let response: Response = self.client.post(self.url.clone())
             .json(&request)
             .send()
             .await?
@@ -91,7 +94,7 @@ impl Client for HttpClient {
         }
     }
 
-    fn connect_stream<T>(&mut self, _id: Value) -> BoxStream<'static, T> {
+    async fn connect_stream<T>(&mut self, _id: SubscriptionId) -> BoxStream<'static, T> {
         panic!("Streams are not supported by the HTTP client.");
     }
 }

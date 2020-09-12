@@ -4,7 +4,7 @@ use tokio::time::Duration;
 use futures::stream::{BoxStream, StreamExt};
 
 use nimiq_jsonrpc_server::{Server, Config};
-use nimiq_jsonrpc_client::http::HttpClient;
+use nimiq_jsonrpc_client::websocket::WebsocketClient;
 
 
 #[nimiq_jsonrpc_derive::proxy(name = "HelloWorldProxy")]
@@ -47,7 +47,8 @@ async fn main() {
         server.run().await;
     });
 
-    let client = HttpClient::new("http://localhost:8000/");
+    let url = "ws://localhost:8000/ws".parse().unwrap();
+    let client = WebsocketClient::new(url).await.unwrap();
     let mut proxy = HelloWorldProxy::new(client);
 
     let mut stream = proxy.hello_subscribe().await.unwrap();

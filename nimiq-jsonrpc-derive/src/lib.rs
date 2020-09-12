@@ -177,7 +177,7 @@ impl<'a> RpcMethod<'a> {
 
         let transform_return_value = if self.attrs.stream.is_some() {
             quote! {
-                let return_value = self.client.connect_stream(return_value);
+                let return_value = self.client.connect_stream(return_value).await;
             }
         }
         else {

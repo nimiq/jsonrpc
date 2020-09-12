@@ -83,7 +83,7 @@ pub trait Client {
     /// client-side error (e.g. a network error), or an error object sent by the server.
     ///
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
-        where P: Serialize + std::fmt::Debug + Send + Sync,
+        where P: Serialize + Debug + Send + Sync,
               R: for<'de> Deserialize<'de> + Debug + Send + Sync;
 
     /// If the client supports streams (i.e. receiving notifications), this should return a stream for the specific
@@ -101,6 +101,6 @@ pub trait Client {
     ///
     /// If the client doesn't support receiving notifications, this method is allowed to panic.
     ///
-    fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
+    async fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
         where T: for<'de> Deserialize<'de> + Debug + Send + Sync;
 }

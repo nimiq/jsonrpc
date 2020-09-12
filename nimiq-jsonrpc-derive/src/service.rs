@@ -71,7 +71,7 @@ fn impl_service(im: &mut ItemImpl, _args: &ServiceMeta) -> TokenStream {
                 &mut self,
                 request: ::nimiq_jsonrpc_core::Request,
                 tx: Option<&::tokio::sync::mpsc::Sender<::std::vec::Vec<u8>>>,
-                stream_id: usize,
+                stream_id: u64,
             ) -> Option<::nimiq_jsonrpc_core::Response> {
                 match request.method.as_str() {
                     #(#match_arms)*

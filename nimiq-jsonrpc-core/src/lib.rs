@@ -1,4 +1,8 @@
-use std::ops::RangeInclusive;
+use std::{
+    ops::RangeInclusive,
+    convert::TryFrom,
+    fmt::{Display, Formatter},
+};
 
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
@@ -7,9 +11,6 @@ use thiserror::Error;
 
 pub const JSONRPC_VERSION: &'static str = "2.0";
 pub const JSONRPC_RESERVED_ERROR_CODES: RangeInclusive<i64> = -32768 ..= -32000;
-
-
-pub type SubscriptionId = Value;
 
 
 /// An error of this JSON-RPC implementation. This can be either an error object returned by the server, or
@@ -26,6 +27,9 @@ pub enum Error {
 
     #[error("Received invalid response")]
     InvalidResponse,
+
+    #[error("Invalid subscription ID: {0:?}")]
+    InvalidSubscriptionId(Value),
 }
 
 impl Error {
@@ -52,6 +56,22 @@ pub enum SingleOrBatch<T> {
     Batch(Vec<T>)
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+pub enum RequestOrResponse {
+    Request(Request),
+    Response(Response),
+}
+
+impl RequestOrResponse {
+    pub fn from_slice(d: &[u8]) -> Result<Self, Error> {
+        Ok(serde_json::from_slice(d)?)
+    }
+
+    pub fn from_str(s: &str) -> Result<Self, Error> {
+        Ok(serde_json::from_str(s)?)
+    }
+}
 
 /// A single JSON-RPC request object
 ///
@@ -124,6 +144,10 @@ impl Request {
         }
 
         Ok(())
+    }
+
+    pub fn from_slice(d: &[u8]) -> Result<Self, Error> {
+        Ok(serde_json::from_slice(d)?)
     }
 }
 
@@ -201,6 +225,10 @@ impl Response {
             }
         }
     }
+
+    pub fn from_slice(d: &[u8]) -> Result<Self, Error> {
+        Ok(serde_json::from_slice(d)?)
+    }
 }
 
 
@@ -275,6 +303,50 @@ impl Default for RpcError {
 impl From<()> for RpcError {
     fn from(_: ()) -> Self {
         Self::default()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Hash, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum SubscriptionId {
+    String(String),
+    Number(u64),
+}
+
+impl TryFrom<Value> for SubscriptionId {
+    type Error = Error;
+
+    fn try_from(value: Value) -> Result<Self, Error> {
+        match value {
+            Value::String(s) => Ok(SubscriptionId::String(s)),
+            Value::Number(n) => {
+                n.as_u64()
+                    .map(|n| SubscriptionId::Number(n))
+                    .ok_or_else(|| Error::InvalidSubscriptionId(Value::Number(n)))
+            },
+            value @ _ => Err(Error::InvalidSubscriptionId(value)),
+        }
+    }
+}
+
+impl From<u64> for SubscriptionId {
+    fn from(n: u64) -> Self {
+        SubscriptionId::Number(n)
+    }
+}
+
+impl From<String> for SubscriptionId {
+    fn from(s: String) -> Self {
+        SubscriptionId::String(s)
+    }
+}
+
+impl Display for SubscriptionId {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+            SubscriptionId::String(s) => write!(f, "{}", s),
+            SubscriptionId::Number(n) => write!(f, "{}", n),
+        }
     }
 }
 

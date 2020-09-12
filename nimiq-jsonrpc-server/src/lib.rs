@@ -7,7 +7,10 @@
 
 use std::{
     net::SocketAddr,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc
+    },
     future::Future,
     fmt::Debug,
 };
@@ -25,7 +28,6 @@ use serde::{
 use thiserror::Error;
 
 use nimiq_jsonrpc_core::{SingleOrBatch, Request, Response, RpcError, SubscriptionId, SubscriptionMessage};
-use std::sync::atomic::Ordering;
 
 
 /// A server error.
@@ -78,7 +80,7 @@ impl Default for Config {
 struct Inner<D: Dispatcher> {
     config: Config,
     dispatcher: RwLock<D>,
-    next_id: AtomicUsize,
+    next_id: AtomicU64,
 }
 
 
@@ -101,7 +103,7 @@ impl<D: Dispatcher> Server<D> {
             inner: Arc::new(Inner {
                 config,
                 dispatcher: RwLock::new(dispatcher),
-                next_id: AtomicUsize::new(1),
+                next_id: AtomicU64::new(1),
             })
         }
     }
@@ -159,10 +161,8 @@ impl<D: Dispatcher> Server<D> {
 
             // Forwards multiplexer queue output to websocket
             let forward_fut = async move {
-                while let Some(request) = multiplex_rx.recv().await {
-                    if let Ok(message) = serde_json::to_vec(&request) {
-                        tx.send(warp::ws::Message::binary(message)).await?;
-                    }
+                while let Some(data) = multiplex_rx.recv().await {
+                    tx.send(warp::ws::Message::binary(data)).await?;
                 }
                 Ok::<(), Error>(())
             };
@@ -257,7 +257,7 @@ impl<D: Dispatcher> Server<D> {
 #[async_trait]
 pub trait Dispatcher: Send + Sync + 'static {
     /// Calls the requested method with the request parameters and returns it's return value (or error) as a resposne.
-    async fn dispatch(&mut self, request: Request, tx: Option<&mpsc::Sender<Vec<u8>>>, id: usize) -> Option<Response>;
+    async fn dispatch(&mut self, request: Request, tx: Option<&mpsc::Sender<Vec<u8>>>, id: u64) -> Option<Response>;
 }
 
 
@@ -386,13 +386,13 @@ async fn forward_notification<T>(item: T, tx: &mut mpsc::Sender<Vec<u8>>, id: &S
 ///
 /// Returns the subscription ID.
 ///
-pub fn connect_stream<T, S>(stream: S, tx: &mpsc::Sender<Vec<u8>>, stream_id: usize, method: String) -> SubscriptionId
+pub fn connect_stream<T, S>(stream: S, tx: &mpsc::Sender<Vec<u8>>, stream_id: u64, method: String) -> SubscriptionId
     where
         T: Serialize + Debug + Send + Sync,
         S: Stream<Item=T> + Send + 'static,
 {
     let mut tx = tx.clone();
-    let id = Value::Number(stream_id.into());
+    let id: SubscriptionId = stream_id.into();
 
     {
         let id = id.clone();
