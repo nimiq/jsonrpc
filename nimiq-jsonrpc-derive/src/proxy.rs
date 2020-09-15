@@ -3,7 +3,7 @@ use proc_macro2::TokenStream;
 use syn::{parse_macro_input, AttributeArgs, TraitItem, ItemTrait};
 use quote::{quote, format_ident};
 
-use crate::RpcMethod;
+use crate::{RpcMethod, RenameAll};
 
 
 /// Parses `#[proxy(...)]`
@@ -11,6 +11,7 @@ use crate::RpcMethod;
 #[darling(default)]
 struct ProxyMeta {
     name: Option<String>,
+    rename_all: Option<String>,
 }
 
 
@@ -52,9 +53,13 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
     let mut args_structs = vec![];
     let mut method_impls = vec![];
 
+    let rename_all: Option<RenameAll> = args.rename_all
+        .as_ref()
+        .map(|r| r.parse().unwrap());
+
     for item in &mut tr.items {
         if let TraitItem::Method(method) = item {
-            let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs);
+            let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs, &rename_all);
 
             let method_code = method.generate_proxy_method();
 

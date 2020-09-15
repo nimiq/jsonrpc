@@ -24,21 +24,26 @@ use nimiq_jsonrpc_core::{Request, Response, RequestOrResponse, SubscriptionMessa
 
 use crate::Client;
 
-
+/// Error type returned by websocket client.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// Websocket error
     #[error("Websocket protocol error: {0}")]
     Websocket(#[from] tungstenite::Error),
 
+    /// JSON-RPC protocol error
     #[error("JSON-RPC protocl error: {0}")]
     JsonRpc(#[from] nimiq_jsonrpc_core::Error),
 
+    /// JSON error
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
+    /// Error in the internal oneshot channel.
     #[error("{0}")]
     OneshotRecv(#[from] oneshot::error::RecvError),
 
+    /// Error in the internal MPSC channel.
     #[error("{0}")]
     MpscSend(#[from] mpsc::error::SendError<SubscriptionMessage<Value>>),
 }
@@ -47,6 +52,7 @@ pub enum Error {
 type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value>>>;
 type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
 
+/// A websocket JSON-RPC client.
 pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
@@ -56,6 +62,12 @@ pub struct WebsocketClient {
 
 
 impl WebsocketClient {
+    /// Creates a new JSON-RPC websocket client.
+    ///
+    /// # Arguments
+    ///
+    ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
+    ///
     pub async fn new(url: Url) -> Result<Self, Error> {
         let (ws_stream, _) = connect_async(url).await?;
 

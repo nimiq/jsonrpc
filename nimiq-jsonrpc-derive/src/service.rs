@@ -3,13 +3,14 @@ use proc_macro2::TokenStream;
 use syn::{parse_macro_input, AttributeArgs, Type, ItemImpl, ImplItem};
 use quote::quote;
 
-use crate::RpcMethod;
+use crate::{RpcMethod, RenameAll};
 
 
 /// Parses `#[service(...)]`
 #[derive(Clone, Debug, Default, FromMeta)]
 #[darling(default)]
 struct ServiceMeta {
+    rename_all: Option<String>,
 }
 
 
@@ -36,9 +37,10 @@ pub fn service_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStre
 }
 
 
-fn impl_service(im: &mut ItemImpl, _args: &ServiceMeta) -> TokenStream {
+fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
     let mut args_structs = vec![];
     let mut match_arms = vec![];
+    let mut name_match_arms = vec![];
 
     let struct_path = match &*im.self_ty {
         Type::Path(path) => &path.path,
@@ -48,9 +50,13 @@ fn impl_service(im: &mut ItemImpl, _args: &ServiceMeta) -> TokenStream {
     let struct_name = &struct_path.segments.last().unwrap().ident;
     let args_struct_prefix = format!("ServiceArgs_{}", struct_name);
 
+    let rename_all: Option<RenameAll> = args.rename_all
+        .as_ref()
+        .map(|r| r.parse().unwrap());
+
     for item in &mut im.items {
         if let ImplItem::Method(method) = item {
-            let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs);
+            let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs, &rename_all);
 
             let match_arm = method.generate_dispatcher_match_arm();
 
@@ -59,6 +65,7 @@ fn impl_service(im: &mut ItemImpl, _args: &ServiceMeta) -> TokenStream {
 
             args_structs.push(method.generate_args_struct());
             match_arms.push(match_arm);
+            name_match_arms.push(method.generate_dispatcher_method_matcher());
         }
     }
 
@@ -75,15 +82,14 @@ fn impl_service(im: &mut ItemImpl, _args: &ServiceMeta) -> TokenStream {
             ) -> Option<::nimiq_jsonrpc_core::Response> {
                 match request.method.as_str() {
                     #(#match_arms)*
+                    _ => ::nimiq_jsonrpc_server::method_not_found(request),
+                }
+            }
 
-                    _ => {
-                        let ::nimiq_jsonrpc_core::Request { id, method, .. } = request;
-
-                        ::nimiq_jsonrpc_server::error_response(
-                            id,
-                            || ::nimiq_jsonrpc_core::RpcError::method_not_found(Some(format!("Method does not exist: {}", method)))
-                        )
-                    }
+            fn match_method(&self, name: &str) -> bool {
+                match name {
+                    #(#name_match_arms)*
+                    _ => false,
                 }
             }
         }

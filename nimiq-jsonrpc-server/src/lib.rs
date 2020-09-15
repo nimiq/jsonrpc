@@ -6,17 +6,18 @@
 
 
 use std::{
-    net::SocketAddr,
+    net::{SocketAddr, IpAddr},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc
     },
     future::Future,
     fmt::Debug,
+    collections::HashSet,
 };
 
 use futures::{stream::{StreamExt, FuturesUnordered}, sink::SinkExt, Stream, pin_mut};
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLockReadGuard, RwLockWriteGuard, RwLock, mpsc};
 use async_trait::async_trait;
 use serde_json::Value;
 use warp::Filter;
@@ -65,6 +66,9 @@ pub struct Config {
 
     /// Enable JSON-RPC over websocket at `/ws`.
     pub enable_websocket: bool,
+
+    /// Allowed IPs
+    pub ip_whitelist: Option<HashSet<IpAddr>>,
 }
 
 impl Default for Config {
@@ -72,6 +76,7 @@ impl Default for Config {
         Self {
             bind_to: ([127, 0, 0, 1], 8000).into(),
             enable_websocket: true,
+            ip_whitelist: None,
         }
     }
 }
@@ -106,6 +111,18 @@ impl<D: Dispatcher> Server<D> {
                 next_id: AtomicU64::new(1),
             })
         }
+    }
+
+    pub async fn config(&self) -> &Config {
+        &self.inner.config
+    }
+
+    pub async fn dispatcher(&self) -> RwLockReadGuard<'_, D> {
+        self.inner.dispatcher.read().await
+    }
+
+    pub async fn dispatcher_mut(&self) -> RwLockWriteGuard<'_, D> {
+        self.inner.dispatcher.write().await
     }
 
     /// Runs the server forever.
@@ -258,6 +275,35 @@ impl<D: Dispatcher> Server<D> {
 pub trait Dispatcher: Send + Sync + 'static {
     /// Calls the requested method with the request parameters and returns it's return value (or error) as a resposne.
     async fn dispatch(&mut self, request: Request, tx: Option<&mpsc::Sender<Vec<u8>>>, id: u64) -> Option<Response>;
+
+    fn match_method(&self, name: &str) -> bool {
+        true
+    }
+}
+
+
+#[derive(Default)]
+pub struct ModularDispatcher {
+    dispatchers: Vec<Box<dyn Dispatcher>>,
+}
+
+#[async_trait]
+impl Dispatcher for ModularDispatcher {
+    async fn dispatch(&mut self, request: Request, tx: Option<&mpsc::Sender<Vec<u8>>>, id: u64) -> Option<Response> {
+        for dispatcher in &mut self.dispatchers {
+            if dispatcher.match_method(&request.method) {
+                return dispatcher.dispatch(request, tx, id).await;
+            }
+        }
+
+        method_not_found(request)
+    }
+}
+
+impl ModularDispatcher {
+    pub fn add<D: Dispatcher>(&mut self, dispatcher: D) {
+        self.dispatchers.push(Box::new(dispatcher));
+    }
 }
 
 
@@ -352,6 +398,15 @@ pub fn error_response<E>(id_opt: Option<Value>, e: E) -> Option<Response>
     else {
         None
     }
+}
+
+pub fn method_not_found(request: Request) -> Option<Response> {
+    let ::nimiq_jsonrpc_core::Request { id, method, .. } = request;
+
+    error_response(
+        id,
+        || RpcError::method_not_found(Some(format!("Method does not exist: {}", method)))
+    )
 }
 
 

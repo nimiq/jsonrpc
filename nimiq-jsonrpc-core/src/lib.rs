@@ -56,6 +56,7 @@ pub enum SingleOrBatch<T> {
     Batch(Vec<T>)
 }
 
+/// Enum that is either a request or response object.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum RequestOrResponse {
@@ -70,6 +71,10 @@ impl RequestOrResponse {
 
     pub fn from_str(s: &str) -> Result<Self, Error> {
         Ok(serde_json::from_str(s)?)
+    }
+
+    pub fn from_value(v: Value) -> Result<Self, Error> {
+        Ok(serde_json::from_value(v)?)
     }
 }
 
@@ -148,6 +153,10 @@ impl Request {
 
     pub fn from_slice(d: &[u8]) -> Result<Self, Error> {
         Ok(serde_json::from_slice(d)?)
+    }
+
+    pub fn to_value(&self) -> Result<Value, Error> {
+        Ok(serde_json::to_value(&self)?)
     }
 }
 

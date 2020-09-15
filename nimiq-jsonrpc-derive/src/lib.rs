@@ -4,9 +4,12 @@ mod proxy;
 use syn::{FnArg, Pat, Ident, Type, Signature, Attribute};
 use quote::{quote, format_ident};
 use proc_macro2::{TokenStream, Literal};
+use heck::{CamelCase, KebabCase, MixedCase, ShoutySnakeCase, SnakeCase};
+use darling::FromMeta;
 
 use service::service_macro;
 use proxy::proxy_macro;
+use std::str::FromStr;
 
 
 #[proc_macro_attribute]
@@ -54,7 +57,7 @@ pub(crate) struct RpcMethod<'a> {
 
 
 impl<'a> RpcMethod<'a> {
-    pub fn new(signature: &'a Signature, args_struct_prefix: &'a str, attrs: &'a mut Vec<Attribute>) -> Self {
+    pub fn new(signature: &'a Signature, args_struct_prefix: &'a str, attrs: &'a mut Vec<Attribute>, rename_all: &Option<RenameAll>) -> Self {
         let mut has_self = false;
         let mut args = vec![];
 
@@ -80,7 +83,13 @@ impl<'a> RpcMethod<'a> {
         let attrs = MethodAttributes::parse(attrs);
         //println!("Method attributes: {:?}", attrs);
 
-        let method_name_literal = Literal::string(&signature.ident.to_string());
+        let method_name = signature.ident.to_string();
+        let method_name = rename_all
+            .as_ref()
+            .map(|r| r.rename(&method_name))
+                .unwrap_or(method_name);
+        let method_name_literal = Literal::string(&method_name);
+
         let args_struct_ident = format_ident!("{}_{}", args_struct_prefix, signature.ident);
 
         Self {
@@ -160,6 +169,12 @@ impl<'a> RpcMethod<'a> {
         }
     }
 
+    pub fn generate_dispatcher_method_matcher(&self) -> TokenStream {
+        let method_name_literal = &self.method_name_literal;
+
+        quote!{ #method_name_literal => true, }
+    }
+
     pub fn generate_proxy_method(&self) -> TokenStream {
         let method_ident = &self.signature.ident;
         let args_struct_ident = &self.args_struct_ident;
@@ -198,6 +213,42 @@ impl<'a> RpcMethod<'a> {
 
                 Ok(return_value)
             }
+        }
+    }
+}
+
+#[derive(Clone, Debug, FromMeta)]
+pub(crate) enum RenameAll {
+    CamelCase,
+    KebabCase,
+    MixedCase,
+    ShoutySnakeCase,
+    SnakeCase,
+}
+
+impl FromStr for RenameAll {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "CamelCase" => Self::CamelCase,
+            "kebab-case" => Self::KebabCase,
+            "mixedCase" => Self::MixedCase,
+            "SHOUTY_SNAKE_CASE" => Self::ShoutySnakeCase,
+            "snake_case" => Self::SnakeCase,
+            _ => panic!("Invalid case name: {}", s),
+        })
+    }
+}
+
+impl RenameAll {
+    pub fn rename(&self, name: &str) -> String {
+        match self {
+            RenameAll::CamelCase => name.to_camel_case(),
+            RenameAll::KebabCase => name.to_kebab_case(),
+            RenameAll::MixedCase => name.to_mixed_case(),
+            RenameAll::ShoutySnakeCase => name.to_shouty_snake_case(),
+            RenameAll::SnakeCase => name.to_snake_case(),
         }
     }
 }
