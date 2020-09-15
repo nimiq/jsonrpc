@@ -56,9 +56,3 @@ async fn main() {
 }
 ```
 
-# TODO
-
- - Implement websocket client
- - Implement *PubSub*
- - Documentation
-
