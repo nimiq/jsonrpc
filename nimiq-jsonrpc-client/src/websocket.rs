@@ -19,14 +19,20 @@ use futures::{
 use serde_json::Value;
 use tungstenite::Message;
 use async_trait::async_trait;
+use http::Request as HttpRequest;
 
-use nimiq_jsonrpc_core::{Request, Response, RequestOrResponse, SubscriptionMessage, SubscriptionId};
+
+use nimiq_jsonrpc_core::{Request, Response, RequestOrResponse, SubscriptionMessage, SubscriptionId, Credentials};
 
 use crate::Client;
 
 /// Error type returned by websocket client.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// HTTP error
+    #[error("HTTP protocol error: {0}")]
+    HTTP(#[from] http::Error),
+
     /// Websocket error
     #[error("Websocket protocol error: {0}")]
     Websocket(#[from] tungstenite::Error),
@@ -67,9 +73,24 @@ impl WebsocketClient {
     /// # Arguments
     ///
     ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
+    ///  - `basic_auth`: Credentials for HTTP basic auth.
     ///
-    pub async fn new(url: Url) -> Result<Self, Error> {
-        let (ws_stream, _) = connect_async(url).await?;
+    pub async fn new(url: Url, basic_auth: Option<Credentials>) -> Result<Self, Error> {
+        let request = {
+            let uri: http::Uri = url.to_string().parse().unwrap();
+            let mut request_builder = HttpRequest::get(uri);
+
+            if let Some(basic_auth) = basic_auth {
+                let header_value = format!("Basic {}", base64::encode(&format!("{}:{}", basic_auth.username, basic_auth.password)));
+                request_builder = request_builder.header("Authorization", header_value);
+            }
+
+            request_builder.body(())?
+        };
+
+        log::debug!("HTTP request: {:?}", request);
+
+        let (ws_stream, _) = connect_async(request).await?;
 
         let (ws_tx, mut ws_rx) = ws_stream.split();
 
@@ -102,6 +123,16 @@ impl WebsocketClient {
             streams,
             requests,
         })
+    }
+
+    /// Creates a new JSON-RPC websocket client.
+    ///
+    /// # Arguments
+    ///
+    ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
+    ///
+    pub async fn with_url(url: Url) -> Result<Self, Error> {
+        Ok(Self::new(url, None).await?)
     }
 
     async fn handle_websocket_message(streams: &Arc<RwLock<StreamsMap>>, requests: &Arc<RwLock<RequestsMap>>, message: Message) -> Result<(), Error> {

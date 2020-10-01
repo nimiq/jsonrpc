@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 log = "0.4"
-warp = "0.2"
+warp = { git = "https://github.com/jgraef/warp.git", branch = "janosch/auth" }
 futures = "0.3"
 tokio = { version = "0.2", features = ["sync"] }
 nimiq-jsonrpc-core = { path = "../nimiq-jsonrpc-core" }

@@ -108,7 +108,7 @@ impl<'a> RpcMethod<'a> {
         let args_struct_ident = &self.args_struct_ident;
 
         let tokens = quote! {
-            #[derive(Debug, Serialize, Deserialize)]
+            #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
             #[allow(non_camel_case_types)]
             struct #args_struct_ident {
                 #(#struct_fields)*

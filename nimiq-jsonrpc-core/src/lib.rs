@@ -364,3 +364,19 @@ pub struct SubscriptionMessage<T> {
     pub subscription: SubscriptionId,
     pub result: T,
 }
+
+// TODO: Move into module
+#[derive(Clone, Debug)]
+pub struct Credentials {
+    pub username: String,
+    pub password: String,
+}
+
+impl From<(&str, &str)> for Credentials {
+    fn from((username, password): (&str, &str)) -> Self {
+        Credentials {
+            username: username.to_owned(),
+            password: password.to_owned(),
+        }
+    }
+}

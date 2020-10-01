@@ -20,7 +20,10 @@ use futures::{stream::{StreamExt, FuturesUnordered}, sink::SinkExt, Stream, pin_
 use tokio::sync::{RwLockReadGuard, RwLockWriteGuard, RwLock, mpsc};
 use async_trait::async_trait;
 use serde_json::Value;
-use warp::Filter;
+use warp::{
+    auth::{Authorization, Basic},
+    Filter
+};
 use bytes::Bytes;
 use serde::{
     ser::Serialize,
@@ -28,7 +31,7 @@ use serde::{
 };
 use thiserror::Error;
 
-use nimiq_jsonrpc_core::{SingleOrBatch, Request, Response, RpcError, SubscriptionId, SubscriptionMessage};
+use nimiq_jsonrpc_core::{SingleOrBatch, Request, Response, RpcError, SubscriptionId, SubscriptionMessage, Credentials};
 
 
 /// A server error.
@@ -67,8 +70,11 @@ pub struct Config {
     /// Enable JSON-RPC over websocket at `/ws`.
     pub enable_websocket: bool,
 
-    /// Allowed IPs
+    /// Allowed IPs. If `None`, all source IPs are allowed.
     pub ip_whitelist: Option<HashSet<IpAddr>>,
+
+    /// Username and password for HTTP basic authentication.
+    pub basic_auth: Option<Credentials>,
 }
 
 impl Default for Config {
@@ -77,9 +83,11 @@ impl Default for Config {
             bind_to: ([127, 0, 0, 1], 8000).into(),
             enable_websocket: true,
             ip_whitelist: None,
+            basic_auth: None,
         }
     }
 }
+
 
 
 struct Inner<D: Dispatcher> {
@@ -113,14 +121,17 @@ impl<D: Dispatcher> Server<D> {
         }
     }
 
+    /// Returns a borrow to the server config.
     pub async fn config(&self) -> &Config {
         &self.inner.config
     }
 
+    /// Returns a borrow to the server's dispatcher.
     pub async fn dispatcher(&self) -> RwLockReadGuard<'_, D> {
         self.inner.dispatcher.read().await
     }
 
+    /// Returns a mutable borrow to the server's dispatcher.
     pub async fn dispatcher_mut(&self) -> RwLockWriteGuard<'_, D> {
         self.inner.dispatcher.write().await
     }
@@ -155,9 +166,33 @@ impl<D: Dispatcher> Server<D> {
                 }
             });
 
-        let routes = ws_route.or(post_route);
+        let json_rpc_route = ws_route.or(post_route);
 
-        warp::serve(routes).run(self.inner.config.bind_to.clone()).await;
+        let root = if self.inner.config.basic_auth.is_some() {
+            let inner = Arc::clone(&self.inner);
+
+            warp::auth::basic("JSON-RPC")
+                .and_then(move |auth_header: Authorization<Basic>| {
+                    let inner = Arc::clone(&inner);
+
+                    async move {
+                        let basic_auth = inner.config.basic_auth.as_ref().unwrap();
+                        if auth_header.0.username() == basic_auth.username && auth_header.0.password() == basic_auth.password {
+                            Ok(())
+                        }
+                        else {
+                            Err(warp::reject::unauthorized())
+                        }
+                    }
+                })
+                .untuple_one()
+                .boxed()
+        }
+        else {
+            warp::any().boxed()
+        };
+
+        warp::serve(root.and(json_rpc_route)).run(self.inner.config.bind_to.clone()).await;
     }
 
     /// Upgrades a connection to websocket. This creates message queues and tasks to forward messages between them.
@@ -276,15 +311,34 @@ pub trait Dispatcher: Send + Sync + 'static {
     /// Calls the requested method with the request parameters and returns it's return value (or error) as a resposne.
     async fn dispatch(&mut self, request: Request, tx: Option<&mpsc::Sender<Vec<u8>>>, id: u64) -> Option<Response>;
 
+    /// Returns whether a method should be dispatched with this dispatcher.
+    ///
+    /// # Arguments
+    ///
+    ///  - `name`: The name of the method to be dispatched.
+    ///
+    /// # Returns
+    ///
+    /// `true` if this dispatcher can handle the method, `false` otherwise.
+    ///
     fn match_method(&self, name: &str) -> bool {
+        let _ = name;
         true
     }
 }
 
 
+/// A dispatcher, that can be composed from other dispatchers.
 #[derive(Default)]
 pub struct ModularDispatcher {
     dispatchers: Vec<Box<dyn Dispatcher>>,
+}
+
+impl ModularDispatcher {
+    /// Adds a dispatcher.
+    pub fn add<D: Dispatcher>(&mut self, dispatcher: D) {
+        self.dispatchers.push(Box::new(dispatcher));
+    }
 }
 
 #[async_trait]
@@ -300,9 +354,62 @@ impl Dispatcher for ModularDispatcher {
     }
 }
 
-impl ModularDispatcher {
-    pub fn add<D: Dispatcher>(&mut self, dispatcher: D) {
-        self.dispatchers.push(Box::new(dispatcher));
+
+/// Dispatcher that only allows specified methods.
+pub struct AllowListDispatcher<D>
+    where
+        D: Dispatcher,
+{
+    /// The underlying dispatcher.
+    pub inner: D,
+
+    /// Allowed methods. If `None`, all methods are allowed.
+    pub method_allowlist: Option<HashSet<String>>,
+}
+
+impl<D> AllowListDispatcher<D>
+    where
+        D: Dispatcher,
+{
+    /// Creates a new `AllowListDispatcher`.
+    ///
+    /// # Arguments
+    ///
+    ///  - `inner`: The underlying dispatcher, which will handle allowed method calls.
+    ///  - `method_allowlist`: Names of allowed methods. If `None`, allows all methods.
+    ///
+    pub fn new(inner: D, method_allowlist: Option<HashSet<String>>) -> Self {
+        Self {
+            inner,
+            method_allowlist,
+        }
+    }
+
+    fn is_allowed(&self, method: &str) -> bool {
+        self.method_allowlist
+            .as_ref()
+            .map(|method_allowlist| method_allowlist.contains(method))
+            .unwrap_or_default()
+    }
+}
+
+#[async_trait]
+impl<D> Dispatcher for AllowListDispatcher<D>
+    where
+        D: Dispatcher,
+{
+    async fn dispatch(&mut self, request: Request, tx: Option<&mpsc::Sender<Vec<u8>>>, id: u64) -> Option<Response> {
+        if self.is_allowed(&request.method) {
+            self.inner.dispatch(request, tx, id).await
+        }
+        else {
+            // If the method is not white-listed, pretend it doesn't exist.
+            method_not_found(request)
+        }
+    }
+
+    fn match_method(&self, name: &str) -> bool {
+        self.is_allowed(name)
     }
 }
 
@@ -400,6 +507,8 @@ pub fn error_response<E>(id_opt: Option<Value>, e: E) -> Option<Response>
     }
 }
 
+/// Returns an error response for a method that was not found. This returns `None`, if the request doesn't expect a
+/// response.
 pub fn method_not_found(request: Request) -> Option<Response> {
     let ::nimiq_jsonrpc_core::Request { id, method, .. } = request;
 

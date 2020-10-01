@@ -5,6 +5,8 @@ use serde::{Serialize, Deserialize};
 
 use nimiq_jsonrpc_server::{Server, Config};
 use nimiq_jsonrpc_client::http::HttpClient;
+use nimiq_jsonrpc_client::websocket::WebsocketClient;
+use nimiq_jsonrpc_core::Credentials;
 
 
 /// You can pass custom types over JSON-RPC, if they implement Serialize and Deserialize.
@@ -52,41 +54,45 @@ impl HelloWorld for HelloWorldService {
 
 #[tokio::main]
 async fn main() {
-    // Load environment variables from `.env` file. You can set the RUST_LOG there, if you like.
     dotenv::dotenv().ok();
-
-    // Default to displaying our debug messages, and only info messages otherwise.
     if env::var("RUST_LOG").is_err() {
         env::set_var("RUST_LOG", "info,nimiq_jsonrpc_core=debug,nimiq_jsonrpc_server=debug,nimiq_jsonrpc_client=debug");
     }
 
     pretty_env_logger::init();
 
+    let credentials: Credentials = ("user1", "password1").into();
+
     let mut config = Config::default();
-
-    // This is the default:
     config.bind_to = ([127, 0, 0, 1], 8000).into();
-
-    // JSON-RPC over websocket is enabled by default, but we don't need it in this example.
+    config.basic_auth = Some(credentials.clone());
     config.enable_websocket = false;
-
     log::info!("Listening on: {}", config.bind_to);
 
-    // Start our `FoobarService` as a JSON-RPC server
     let server = Server::new(config, HelloWorldService);
     tokio::spawn(async move {
         server.run().await;
     });
 
-    // The server is running now, so we can connect to it. The `HttpClient` will send all requests as a HTTP POST to
-    // the specified URL.
-    let client = HttpClient::with_url("http://localhost:8000/".parse().unwrap());
-
-    // Next we can use the proxy that we generated earlier and construct it with the client.
+    // Over HTTP POST
+    let client = HttpClient::new(
+        Default::default(),
+        "http://localhost:8000/".parse().unwrap(),
+        Some(credentials.clone()),
+    );
     let mut proxy = HelloWorldProxy::new(client);
+    let retval = proxy.hello("World".to_owned(), HelloWorldData { a: 42 })
+        .await
+        .expect("RPC call failed");
+    log::info!("RPC call returned: {}", retval);
 
-    // The proxy implements our `HelloWorld` RPC interface and will send a request to the server, when a method is
-    // called.
+    // Over websocket
+    let client = WebsocketClient::new(
+            "ws://localhost:8000/ws".parse().unwrap(),
+            Some(credentials)
+        )
+        .await.unwrap();
+    let mut proxy = HelloWorldProxy::new(client);
     let retval = proxy.hello("World".to_owned(), HelloWorldData { a: 42 })
         .await
         .expect("RPC call failed");

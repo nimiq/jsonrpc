@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use serde::{Serialize, Deserialize};
 use tokio::time::Duration;
 use futures::stream::{BoxStream, StreamExt};
 
@@ -48,7 +47,7 @@ async fn main() {
     });
 
     let url = "ws://localhost:8000/ws".parse().unwrap();
-    let client = WebsocketClient::new(url).await.unwrap();
+    let client = WebsocketClient::with_url(url).await.unwrap();
     let mut proxy = HelloWorldProxy::new(client);
 
     let mut stream = proxy.hello_subscribe().await.unwrap();

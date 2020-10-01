@@ -31,7 +31,7 @@
 /// nimiq-jsonrpc-client = { version = "...", features = ["http"] }
 /// ```
 ///
-#[cfg(feature = "http")]
+#[cfg(feature = "http-client")]
 pub mod http;
 
 /// An implementation of JSON-RPC over websockets. Feature `websocket` must be enabled:
@@ -41,7 +41,7 @@ pub mod http;
 /// nimiq-jsonrpc-client = { version = "...", features = ["websocket"] }
 /// ```
 ///
-#[cfg(feature = "websocket")]
+#[cfg(feature = "websocket-client")]
 pub mod websocket;
 
 

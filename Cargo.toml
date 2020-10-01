@@ -7,4 +7,5 @@ members = [
 
 	"examples/hello_world",
 	"examples/pubsub",
+	"examples/basic_auth",
 ]
