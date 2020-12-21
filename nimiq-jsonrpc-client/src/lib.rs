@@ -45,14 +45,20 @@ pub mod http;
 pub mod websocket;
 
 
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    sync::Arc,
+};
 
 use serde::{
     ser::Serialize,
     de::Deserialize,
 };
 use async_trait::async_trait;
-use futures::stream::BoxStream;
+use futures::{
+    stream::BoxStream,
+    lock::Mutex,
+};
 
 use nimiq_jsonrpc_core::SubscriptionId;
 
@@ -103,4 +109,41 @@ pub trait Client {
     ///
     async fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
         where T: for<'de> Deserialize<'de> + Debug + Send + Sync;
+}
+
+
+pub struct ArcClient<C: Client> {
+    inner: Arc<Mutex<C>>,
+}
+
+#[async_trait]
+impl<C: Client + Send> Client for ArcClient<C> {
+    type Error = <C as Client>::Error;
+
+    async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
+        where P: Serialize + Debug + Send + Sync,
+              R: for<'de> Deserialize<'de> + Debug + Send + Sync
+    {
+        self.inner.lock().await.send_request(method, params).await
+    }
+
+    async fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
+        where T: for<'de> Deserialize<'de> + Debug + Send + Sync
+    {
+        self.inner.lock().await.connect_stream(id).await
+    }
+}
+
+impl<C: Client> ArcClient<C> {
+    pub fn new(inner: C) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(inner)),
+        }
+    }
+
+    pub fn clone(&self) -> Self {
+        ArcClient {
+            inner: Arc::clone(&self.inner)
+        }
+    }
 }
