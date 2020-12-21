@@ -74,7 +74,7 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
     quote! {
         #(#args_structs)*
 
-        struct #struct_ident<C>
+        pub struct #struct_ident<C>
             where C: ::nimiq_jsonrpc_client::Client + ::std::marker::Send + ::std::marker::Sync
         {
             pub client: C,
