@@ -300,7 +300,14 @@ impl<D: Dispatcher> Server<D> {
         let mut dispatcher = inner.dispatcher.write().await;
         // This ID is only used for streams
         let id = inner.next_id.fetch_add(1, Ordering::SeqCst);
-        dispatcher.dispatch(request, tx, id).await
+
+        log::debug!("request: {:#?}", request);
+
+        let response = dispatcher.dispatch(request, tx, id).await;
+
+        log::debug!("response: {:#?}", response);
+
+        response
     }
 }
 
@@ -321,10 +328,11 @@ pub trait Dispatcher: Send + Sync + 'static {
     ///
     /// `true` if this dispatcher can handle the method, `false` otherwise.
     ///
-    fn match_method(&self, name: &str) -> bool {
-        let _ = name;
+    fn match_method(&self, _name: &str) -> bool {
         true
     }
+
+    fn method_names(&self) -> Vec<&str>;
 }
 
 
@@ -345,12 +353,22 @@ impl ModularDispatcher {
 impl Dispatcher for ModularDispatcher {
     async fn dispatch(&mut self, request: Request, tx: Option<&mpsc::Sender<Vec<u8>>>, id: u64) -> Option<Response> {
         for dispatcher in &mut self.dispatchers {
-            if dispatcher.match_method(&request.method) {
+            let m = dispatcher.match_method(&request.method);
+            log::debug!("Matching '{}' against dispatcher -> {}", request.method, m);
+            log::debug!("Methods: {:?}", dispatcher.method_names());
+            if m {
                 return dispatcher.dispatch(request, tx, id).await;
             }
         }
 
         method_not_found(request)
+    }
+
+    fn method_names(&self) -> Vec<&str> {
+        self.dispatchers.iter()
+            .map(|dispatcher| dispatcher.method_names())
+            .flatten()
+            .collect()
     }
 }
 
@@ -400,16 +418,31 @@ impl<D> Dispatcher for AllowListDispatcher<D>
 {
     async fn dispatch(&mut self, request: Request, tx: Option<&mpsc::Sender<Vec<u8>>>, id: u64) -> Option<Response> {
         if self.is_allowed(&request.method) {
+            log::debug!("Dispatching method: {}", request.method);
             self.inner.dispatch(request, tx, id).await
         }
         else {
+            log::debug!("Method not allowed: {}", request.method);
             // If the method is not white-listed, pretend it doesn't exist.
             method_not_found(request)
         }
     }
 
     fn match_method(&self, name: &str) -> bool {
-        self.is_allowed(name)
+        if !self.is_allowed(name) {
+            log::debug!("Method not allowed: {}", name);
+            false
+        }
+        else {
+            true
+        }
+    }
+
+    fn method_names(&self) -> Vec<&str> {
+        self.inner.method_names()
+            .into_iter()
+            .filter(|method_name| self.is_allowed(method_name))
+            .collect()
     }
 }
 
@@ -437,7 +470,10 @@ pub async fn dispatch_method_with_args<P, R, E, F, Fut>(request: Request, f: F) 
 
     let params = match serde_json::from_value(params) {
         Ok(params) => params,
-        Err(_e) => return error_response(request.id, || RpcError::invalid_params(Some("Expected an object for the request parameters.".to_owned()))),
+        Err(e) => {
+            log::error!("{}", e);
+            return error_response(request.id, || RpcError::invalid_params(Some("Expected an object for the request parameters.".to_owned())))
+        },
     };
 
     let result = f(params).await;
@@ -500,7 +536,9 @@ pub fn error_response<E>(id_opt: Option<Value>, e: E) -> Option<Response>
         E: FnOnce() -> RpcError,
 {
     if let Some(id) = id_opt {
-        Some(Response::new_error(id, e()))
+        let e = e();
+        log::error!("Error response: {:?}", e);
+        Some(Response::new_error(id, e))
     }
     else {
         None

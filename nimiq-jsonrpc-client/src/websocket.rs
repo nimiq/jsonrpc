@@ -38,7 +38,7 @@ pub enum Error {
     Websocket(#[from] tungstenite::Error),
 
     /// JSON-RPC protocol error
-    #[error("JSON-RPC protocl error: {0}")]
+    #[error("JSON-RPC protocol error: {0}")]
     JsonRpc(#[from] nimiq_jsonrpc_core::Error),
 
     /// JSON error
@@ -138,7 +138,7 @@ impl WebsocketClient {
     async fn handle_websocket_message(streams: &Arc<RwLock<StreamsMap>>, requests: &Arc<RwLock<RequestsMap>>, message: Message) -> Result<(), Error> {
         let data = message.into_text()?;
 
-        log::debug!("Received message: {:?}", data);
+        log::trace!("Received message: {:?}", data);
 
         let message = RequestOrResponse::from_str(&data)?;
 

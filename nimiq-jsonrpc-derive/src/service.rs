@@ -41,6 +41,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
     let mut args_structs = vec![];
     let mut match_arms = vec![];
     let mut name_match_arms = vec![];
+    let mut method_names = vec![];
 
     let struct_path = match &*im.self_ty {
         Type::Path(path) => &path.path,
@@ -59,6 +60,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
             let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs, &rename_all);
 
             let match_arm = method.generate_dispatcher_match_arm();
+            let method_name_lit = &method.method_name_literal;
 
             //println!("Generated match arm:");
             //println!("{}", match_arm);
@@ -66,6 +68,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
             args_structs.push(method.generate_args_struct());
             match_arms.push(match_arm);
             name_match_arms.push(method.generate_dispatcher_method_matcher());
+            method_names.push(quote!{ #method_name_lit });
         }
     }
 
@@ -91,6 +94,12 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
                     #(#name_match_arms)*
                     _ => false,
                 }
+            }
+
+            fn method_names(&self) -> Vec<&str> {
+                vec![
+                    #(#method_names),*
+                ]
             }
         }
     }

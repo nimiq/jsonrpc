@@ -24,7 +24,7 @@ use crate::Client;
 #[derive(Debug, Error)]
 pub enum Error {
     /// JSON-RPC protocol error
-    #[error("JSON-RPC protocl error: {0}")]
+    #[error("JSON-RPC protocol error: {0}")]
     JsonRpc(#[from] nimiq_jsonrpc_core::Error),
 
     /// JSON error
