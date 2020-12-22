@@ -389,7 +389,7 @@ impl<D> AllowListDispatcher<D>
         self.method_allowlist
             .as_ref()
             .map(|method_allowlist| method_allowlist.contains(method))
-            .unwrap_or_default()
+            .unwrap_or(true)
     }
 }
 
