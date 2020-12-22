@@ -59,6 +59,11 @@ type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value
 type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
 
 /// A websocket JSON-RPC client.
+///
+/// # TODO
+///
+///  - Gracefully close the websocket, when the client is dropped.
+///
 pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,

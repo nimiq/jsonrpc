@@ -233,7 +233,7 @@ impl FromStr for RenameAll {
         Ok(match s {
             "CamelCase" => Self::CamelCase,
             "kebab-case" => Self::KebabCase,
-            "mixedCase" => Self::MixedCase,
+            "mixedCase" | "camelCase" => Self::MixedCase,
             "SHOUTY_SNAKE_CASE" => Self::ShoutySnakeCase,
             "snake_case" => Self::SnakeCase,
             _ => panic!("Invalid case name: {}", s),
