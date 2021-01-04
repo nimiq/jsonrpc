@@ -332,6 +332,7 @@ pub trait Dispatcher: Send + Sync + 'static {
         true
     }
 
+    /// Returns the names of all methods matched by this dispatcher.
     fn method_names(&self) -> Vec<&str>;
 }
 
