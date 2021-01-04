@@ -209,7 +209,7 @@ impl<D: Dispatcher> Server<D> {
         ws.on_upgrade(move |websocket| {
             let (mut tx, mut rx) = websocket.split();
 
-            let (mut multiplex_tx, mut multiplex_rx) = mpsc::channel(16); // TODO: What size?
+            let (multiplex_tx, mut multiplex_rx) = mpsc::channel(16); // TODO: What size?
 
             // Forwards multiplexer queue output to websocket
             let forward_fut = async move {
