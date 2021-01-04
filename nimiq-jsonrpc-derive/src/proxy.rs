@@ -45,6 +45,7 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
         Some(name) => format_ident!("{}", name),
         None => format_ident!("{}Proxy", trait_ident),
     };
+    //println!("Generating proxy for {} as {}", trait_ident, struct_ident);
 
     //println!("proxy struct name: {:?}", struct_ident);
 

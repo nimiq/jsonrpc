@@ -149,7 +149,7 @@ impl<'a> RpcMethod<'a> {
                         let ::nimiq_jsonrpc_core::Request { id, .. } = request;
                             ::nimiq_jsonrpc_server::error_response(
                             id,
-                            || ::nimiq_jsonrpc_core::RpcError::internal_error(Some("Client does not support streams".to_owned()))
+                            || ::nimiq_jsonrpc_core::RpcError::internal_from_string(Some("Client does not support streams".to_owned()))
                         )
                     }
                 }
@@ -180,6 +180,7 @@ impl<'a> RpcMethod<'a> {
         let args_struct_ident = &self.args_struct_ident;
         let method_name_literal = &self.method_name_literal;
         let output = &self.signature.output;
+        //println!("Generating proxy method: {}", method_ident);
 
         let method_args = self.args.iter()
             .map(|(ident, ty)| quote! { #ident: #ty })
