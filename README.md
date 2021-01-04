@@ -56,3 +56,6 @@ async fn main() {
 }
 ```
 
+# TODO
+
+ - [_] Share code between websocket clients.

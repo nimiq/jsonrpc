@@ -44,6 +44,9 @@ pub mod http;
 #[cfg(feature = "websocket-client")]
 pub mod websocket;
 
+#[cfg(feature = "wasm-websocket-client")]
+pub mod wasm_websocket;
+
 
 use std::{
     fmt::Debug,
@@ -112,7 +115,8 @@ pub trait Client {
 }
 
 
-pub struct ArcClient<C: Client> {
+/// Wraps a client into an `Arc<Mutex<_>>`, so that it can be cloned.
+pub struct ArcClient<C> {
     inner: Arc<Mutex<C>>,
 }
 
@@ -135,13 +139,16 @@ impl<C: Client + Send> Client for ArcClient<C> {
 }
 
 impl<C: Client> ArcClient<C> {
+    /// Creates a new `ArcClient` from the inner client.
     pub fn new(inner: C) -> Self {
         Self {
             inner: Arc::new(Mutex::new(inner)),
         }
     }
+}
 
-    pub fn clone(&self) -> Self {
+impl<C> Clone for ArcClient<C> {
+    fn clone(&self) -> Self {
         ArcClient {
             inner: Arc::clone(&self.inner)
         }

@@ -1,40 +1,44 @@
+//! A client implementation for JSON-RPC over Websocket using web_sys.
+//!
+//! # EXPERIMENTAL
+//!
+//! This is still experimental.
+
 use std::{
-    collections::HashMap,
     sync::Arc,
-    fmt::Debug
+    collections::HashMap,
+    fmt::Debug,
+    cell::RefCell,
 };
 
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tokio::{
     sync::{mpsc, oneshot, RwLock},
-    net::TcpStream,
-};
-use thiserror::Error;
-use url::Url;
-use serde::{Serialize, Deserialize};
-use futures::{
-    stream::{BoxStream, StreamExt, SplitSink},
-    sink::SinkExt,
 };
 use serde_json::Value;
-use tungstenite::Message;
+use thiserror::Error;
+use serde::{Serialize, Deserialize};
+use futures::stream::{BoxStream, StreamExt};
 use async_trait::async_trait;
-use http::Request as HttpRequest;
+use url::Url;
 
-use nimiq_jsonrpc_core::{Request, Response, RequestOrResponse, SubscriptionMessage, SubscriptionId, Credentials};
+use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+use web_sys::{WebSocket, MessageEvent, ErrorEvent};
+
+use nimiq_jsonrpc_core::{Request, Response, RequestOrResponse, SubscriptionMessage, SubscriptionId};
 
 use crate::Client;
 
-/// Error type returned by websocket client.
+
+type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value>>>;
+type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
+
+
+/// Error type for this client
 #[derive(Debug, Error)]
 pub enum Error {
-    /// HTTP error
-    #[error("HTTP protocol error: {0}")]
-    HTTP(#[from] http::Error),
-
-    /// Websocket error
-    #[error("Websocket protocol error: {0}")]
-    Websocket(#[from] tungstenite::Error),
+    /// Something on the Javascript side went wrong.
+    #[error("JS: {0:?}")]
+    Js(JsValue),
 
     /// JSON-RPC protocol error
     #[error("JSON-RPC protocol error: {0}")]
@@ -53,96 +57,98 @@ pub enum Error {
     MpscSend(#[from] mpsc::error::SendError<SubscriptionMessage<Value>>),
 }
 
+impl From<JsValue> for Error {
+    fn from(v: JsValue) -> Self {
+        Self::Js(v)
+    }
+}
 
-type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value>>>;
-type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
 
-/// A websocket JSON-RPC client.
-///
-/// # TODO
-///
-///  - Gracefully close the websocket, when the client is dropped.
+/// A JSON-RPC client over a Javascript websocket
 ///
 pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
-    sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
     next_id: u64,
+    sender: mpsc::Sender<Vec<u8>>,
 }
 
 
 impl WebsocketClient {
-    /// Creates a new JSON-RPC websocket client.
-    ///
-    /// # Arguments
-    ///
-    ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
-    ///  - `basic_auth`: Credentials for HTTP basic auth.
-    ///
-    pub async fn new(url: Url, basic_auth: Option<Credentials>) -> Result<Self, Error> {
-        let request = {
-            let uri: http::Uri = url.to_string().parse().unwrap();
-            let mut request_builder = HttpRequest::get(uri);
-
-            if let Some(basic_auth) = basic_auth {
-                let header_value = format!("Basic {}", base64::encode(&format!("{}:{}", basic_auth.username, basic_auth.password)));
-                request_builder = request_builder.header("Authorization", header_value);
-            }
-
-            request_builder.body(())?
-        };
-
-        log::debug!("HTTP request: {:?}", request);
-
-        let (ws_stream, _) = connect_async(request).await?;
-
-        let (ws_tx, mut ws_rx) = ws_stream.split();
+    /// Creates a new websocket client, connecting to the specified url.
+    pub async fn new(url: Url) -> Result<Self, Error> {
+        let ws = WebSocket::new(&url.to_string())?;
+        ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
         let streams = Arc::new(RwLock::new(HashMap::new()));
         let requests = Arc::new(RwLock::new(HashMap::new()));
 
-        {
+        // Let the onmessage callback spawn a future to handle the message
+        let onmessage_callback = {
             let streams = Arc::clone(&streams);
             let requests = Arc::clone(&requests);
 
-            tokio::spawn(async move {
-                while let Some(message_result) = ws_rx.next().await {
-                    match message_result {
-                        Ok(message) => {
-                            if let Err(e) = Self::handle_websocket_message(&streams, &requests, message).await {
-                                log::error!("{}", e);
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("{}", e);
-                        }
-                    }
-                }
-            });
-        }
+            Closure::wrap(Box::new(move |e: MessageEvent| {
+                // TODO: Currently we only send the JSON-RPC as data (blob)
+                if let Ok(buf) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
+                    let data = js_sys::Uint8Array::new(&buf).to_vec();
+                    let data = String::from_utf8(data).unwrap();
 
+                    let streams = Arc::clone(&streams);
+                    let requests = Arc::clone(&requests);
+
+                    wasm_bindgen_futures::spawn_local(async move {
+                        Self::handle_websocket_message(&streams, &requests, data).await.unwrap();
+                    })
+                }
+                else {
+                    log::error!("Failed to cast message");
+                }
+            }) as Box<dyn FnMut(MessageEvent)>)
+        };
+        ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
+        onmessage_callback.forget();
+
+        // Log errors only
+        let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
+            log::error!("Websocket error: {:?}", e);
+        }) as Box<dyn FnMut(ErrorEvent)>);
+        ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
+        onerror_callback.forget();
+
+        // Register onopen so we can wait for the websocket to be open
+        let (ready_tx, ready_rx) = oneshot::channel::<()>();
+        let ready_tx = Arc::new(RefCell::new(Some(ready_tx)));
+        let onopen_callback = Closure::wrap(Box::new(move |_| {
+            if let Some(ready_tx) = ready_tx.replace(None) {
+                ready_tx.send(()).unwrap();
+            }
+        }) as Box<dyn FnMut(JsValue)>);
+
+        ws.set_onopen(Some(onopen_callback.as_ref().unchecked_ref()));
+        onopen_callback.forget();
+
+        // Spawn future to do the sending for us
+        let (msg_tx, mut msg_rx) = mpsc::channel::<Vec<u8>>(1);
+        wasm_bindgen_futures::spawn_local(async move {
+            while let Some(message) = msg_rx.recv().await {
+                ws.send_with_u8_array(&message).unwrap();
+            }
+        });
+
+        // Now wait for the websocket to be open
+        ready_rx.await.unwrap();
+
+        // Return the client
         Ok(Self {
             next_id: 1,
-            sender: ws_tx,
             streams,
             requests,
+            sender: msg_tx,
         })
     }
 
-    /// Creates a new JSON-RPC websocket client.
-    ///
-    /// # Arguments
-    ///
-    ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
-    ///
-    pub async fn with_url(url: Url) -> Result<Self, Error> {
-        Ok(Self::new(url, None).await?)
-    }
-
-    async fn handle_websocket_message(streams: &Arc<RwLock<StreamsMap>>, requests: &Arc<RwLock<RequestsMap>>, message: Message) -> Result<(), Error> {
-        // FIXME: This will also accept pings
-        let data = message.into_text()?;
-
+    async fn handle_websocket_message(streams: &Arc<RwLock<StreamsMap>>, requests: &Arc<RwLock<RequestsMap>>, data: String) -> Result<(), Error> {
         log::trace!("Received message: {:?}", data);
 
         let message = RequestOrResponse::from_str(&data)?;
@@ -202,7 +208,7 @@ impl Client for WebsocketClient {
         let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
 
-        self.sender.send(Message::Binary(serde_json::to_vec(&request)?)).await?;
+        self.sender.send(serde_json::to_vec(&request)?).await.unwrap();
 
         let (tx, rx) = oneshot::channel();
 

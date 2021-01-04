@@ -13,6 +13,23 @@ pub const JSONRPC_VERSION: &'static str = "2.0";
 pub const JSONRPC_RESERVED_ERROR_CODES: RangeInclusive<i64> = -32768 ..= -32000;
 
 
+trait IntoRpcError {
+    fn into_rpc_error(self) -> Option<RpcError>;
+}
+
+impl IntoRpcError for serde_json::Error {
+    fn into_rpc_error(self) -> Option<RpcError> {
+        Some(RpcError::internal_error(Some(
+            serde_json::json!({
+                "line": self.line(),
+                "column": self.column(),
+                "classify": format!("{:?}", self.classify()),
+            })
+        )))
+    }
+}
+
+
 /// An error of this JSON-RPC implementation. This can be either an error object returned by the server, or
 /// any other error that might be triggered in the server or client (e.g. a network error).
 #[derive(Debug, Error)]
@@ -32,13 +49,16 @@ pub enum Error {
     InvalidSubscriptionId(Value),
 }
 
-impl Error {
+impl IntoRpcError for Error {
     /// Tries to convert this error to an error after the JSON-RPC specification.
-    pub fn into_rpc_error(self) -> Option<RpcError> {
+    fn into_rpc_error(self) -> Option<RpcError> {
         match self {
             Error::JsonRpc(e) => Some(e),
-            Error::Json(e) => Some(RpcError::parse_error(Some(e.to_string()))),
-            _ => None,
+            Error::Json(e) => e.into_rpc_error(),
+            Error::InvalidResponse => None,
+            Error::InvalidSubscriptionId(id) => {
+                Some(RpcError::internal_error(Some(id)))
+            },
         }
     }
 }
@@ -274,32 +294,40 @@ impl std::fmt::Display for RpcError {
 }
 
 impl RpcError {
-    fn new_reserved(code: i64, message: &'static str, description: Option<String>) -> Self {
+    fn new_reserved(code: i64, message: &'static str, data: Option<Value>) -> Self {
         Self {
             code,
             message: Some(message.to_owned()),
-            data: description.map(|s| Value::String(s)),
+            data,
+        }
+    }
+
+    fn new_reserved_with_description(code: i64, message: &'static str, description: Option<String>) -> Self {
+        Self {
+            code,
+            message: Some(message.to_owned()),
+            data: description.map(|s| Value::from(s)),
         }
     }
 
     pub fn parse_error(description: Option<String>) -> Self {
-        Self::new_reserved(-32700, "Parse error", description)
+        Self::new_reserved_with_description(-32700, "Parse error", description)
     }
 
     pub fn invalid_request(description: Option<String>) -> Self {
-        Self::new_reserved(-32600, "Invalid Request", description)
+        Self::new_reserved_with_description(-32600, "Invalid Request", description)
     }
 
     pub fn method_not_found(description: Option<String>) -> Self {
-        Self::new_reserved(-32601, "Method not found", description)
+        Self::new_reserved_with_description(-32601, "Method not found", description)
     }
 
     pub fn invalid_params(description: Option<String>) -> Self {
-        Self::new_reserved(-32602, "Invalid params", description)
+        Self::new_reserved_with_description(-32602, "Invalid params", description)
     }
 
-    pub fn internal_error(description: Option<String>) -> Self {
-        Self::new_reserved(-32603, "Internal error", description)
+    pub fn internal_error(data: Option<Value>) -> Self {
+        Self::new_reserved(-32603, "Internal error", data)
     }
 }
 
