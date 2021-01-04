@@ -27,8 +27,6 @@ impl HelloWorld for HelloWorldService {
     async fn hello_subscribe(&mut self) -> Result<BoxStream<'static, String>, Self::Error> {
         log::info!("Client subscribed");
 
-
-
         let mut interval = tokio::time::interval(Duration::from_secs(1));
 
         let stream = stream! {

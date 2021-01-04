@@ -11,10 +11,11 @@ serde = "1.0"
 log = "0.4"
 thiserror = "1.0"
 async-trait = "0.1"
-reqwest = { version = "0.10", optional = true, features = ["json"] }
+#reqwest = { version = "0.10", optional = true, features = ["json"] }
+reqwest = { git = "https://github.com/messense/reqwest.git", optional = true, features = ["json"] }
 #tokio-tungstenite = { version = "0.11", optional = true }
-#tokio-tungstenite = { git = "https://github.com/dnaka91/tokio-tungstenite.git", optional = true }
-tokio-tungstenite = { path = "../../tokio-tungstenite", optional = true }
+tokio-tungstenite = { git = "https://github.com/dnaka91/tokio-tungstenite.git", branch = "tokio-1.0", optional = true }
+#tokio-tungstenite = { path = "../../tokio-tungstenite", optional = true }
 tokio = { version = "1.0", features = ["net", "sync"], optional = true }
 http = { version = "0.2", optional = true }
 base64 = { version = "0.12.3", optional = true }
