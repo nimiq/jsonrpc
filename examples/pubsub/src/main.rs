@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use tokio::time::Duration;
 use futures::stream::{BoxStream, StreamExt};
+use async_stream::stream;
 
 use nimiq_jsonrpc_server::{Server, Config};
 use nimiq_jsonrpc_client::websocket::WebsocketClient;
@@ -26,10 +27,17 @@ impl HelloWorld for HelloWorldService {
     async fn hello_subscribe(&mut self) -> Result<BoxStream<'static, String>, Self::Error> {
         log::info!("Client subscribed");
 
-        let stream = tokio::time::interval(Duration::from_secs(1))
-            .map(|instant| format!("Hello, World: {:?}", instant));
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
 
-        Ok(Box::pin(stream))
+        let stream = stream! {
+            loop {
+                let instant = interval.tick().await;
+                yield format!("Hello, World: {:?}", instant);
+            }
+        };
+
+
+        Ok(stream.boxed())
     }
 }
 

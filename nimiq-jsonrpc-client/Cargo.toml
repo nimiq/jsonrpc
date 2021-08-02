@@ -11,10 +11,9 @@ serde = "1.0"
 log = "0.4"
 thiserror = "1.0"
 async-trait = "0.1"
-reqwest = { version = "0.10", optional = true, features = ["json"] }
-tokio-tungstenite = { version = "0.11", optional = true }
-tungstenite = { version = "0.11", optional = true }
-tokio = { version = "0.2", features = ["net", "sync", "stream"], optional = true }
+reqwest = { version = "0.11", optional = true, features = ["json"] }
+tokio-tungstenite = { version = "0.15", optional = true }
+tokio = { version = "1.9", features = ["net", "sync"], optional = true }
 http = { version = "0.2", optional = true }
 base64 = { version = "0.12.3", optional = true }
 url = "2.2"
@@ -24,6 +23,7 @@ nimiq-jsonrpc-core = { path = "../nimiq-jsonrpc-core" }
 wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
+async-stream = "0.3"
 
 [dependencies.web-sys]
 version = "0.3"
@@ -39,7 +39,7 @@ features = [
 ]
 
 [features]
-default = ["http-client", "websocket-client"]
+default = ["websocket-client", "http-client"]
 http-client = ["reqwest"]
-websocket-client = ["tokio-tungstenite", "tokio", "tungstenite", "http", "base64"]
+websocket-client = ["tokio-tungstenite", "tokio", "base64", "http", "tokio/rt"]
 wasm-websocket-client = ["wasm-bindgen", "web-sys", "js-sys", "tokio", "wasm-bindgen-futures"]

@@ -326,6 +326,10 @@ impl RpcError {
         Self::new_reserved_with_description(-32602, "Invalid params", description)
     }
 
+    pub fn internal_from_string(description: Option<String>) -> Self {
+        Self::new_reserved_with_description(-32603, "Internal error", description)
+    }
+
     pub fn internal_error(data: Option<Value>) -> Self {
         Self::new_reserved(-32603, "Internal error", data)
     }

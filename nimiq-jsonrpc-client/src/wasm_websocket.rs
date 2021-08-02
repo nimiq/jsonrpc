@@ -220,17 +220,21 @@ impl Client for WebsocketClient {
         Ok(rx.await?.into_result()?)
     }
 
-    async fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
+    async fn connect_stream<T: Unpin + 'static>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
         where
             T: for<'de> Deserialize<'de> + Debug + Send + Sync
     {
-        let (tx, rx) = mpsc::channel(16);
+        let (tx, mut rx) = mpsc::channel(16);
 
         self.streams.write().await.insert(id, tx);
 
-        Box::pin(rx.map(|message: SubscriptionMessage<Value>| {
-            serde_json::from_value(message.result)
-                .expect("Failed to deserialize notification")
-        }))
+        let stream = async_stream::stream! {
+            loop {
+                let message = rx.recv().await.unwrap();
+                yield serde_json::from_value(message.result).unwrap();
+            }
+        };
+
+        stream.boxed()
     }
 }

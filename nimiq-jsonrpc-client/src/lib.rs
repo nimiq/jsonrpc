@@ -110,7 +110,7 @@ pub trait Client {
     ///
     /// If the client doesn't support receiving notifications, this method is allowed to panic.
     ///
-    async fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
+    async fn connect_stream<T: Unpin + 'static>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
         where T: for<'de> Deserialize<'de> + Debug + Send + Sync;
 }
 
@@ -131,7 +131,7 @@ impl<C: Client + Send> Client for ArcClient<C> {
         self.inner.lock().await.send_request(method, params).await
     }
 
-    async fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
+    async fn connect_stream<T: Unpin + 'static>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
         where T: for<'de> Deserialize<'de> + Debug + Send + Sync
     {
         self.inner.lock().await.connect_stream(id).await
