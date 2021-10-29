@@ -206,6 +206,8 @@ impl Client for WebsocketClient {
         let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
 
+        log::debug!("Sending request: {:?}", request);
+
         self.sender
             .send(Message::Binary(serde_json::to_vec(&request)?))
             .await?;
@@ -214,8 +216,12 @@ impl Client for WebsocketClient {
 
         let mut requests = self.requests.write().await;
         requests.insert(request_id, tx);
+        drop(requests);
 
-        Ok(rx.await?.into_result()?)
+        let response = rx.await?;
+        log::debug!("Received response: {:?}", response);
+
+        Ok(response.into_result()?)
     }
 
     async fn connect_stream<T: Unpin + 'static>(
