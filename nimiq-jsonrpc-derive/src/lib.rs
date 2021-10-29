@@ -1,27 +1,31 @@
-mod service;
 mod proxy;
+mod service;
 
-use syn::{FnArg, Pat, Ident, Type, Signature, Attribute};
-use quote::{quote, format_ident};
-use proc_macro2::{TokenStream, Literal};
-use heck::{CamelCase, KebabCase, MixedCase, ShoutySnakeCase, SnakeCase};
 use darling::FromMeta;
+use heck::{CamelCase, KebabCase, MixedCase, ShoutySnakeCase, SnakeCase};
+use proc_macro2::{Literal, TokenStream};
+use quote::{format_ident, quote};
+use syn::{Attribute, FnArg, Ident, Pat, Signature, Type};
 
-use service::service_macro;
 use proxy::proxy_macro;
+use service::service_macro;
 use std::str::FromStr;
 
-
 #[proc_macro_attribute]
-pub fn service(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn service(
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
     service_macro(args, input)
 }
 
 #[proc_macro_attribute]
-pub fn proxy(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn proxy(
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
     proxy_macro(args, input)
 }
-
 
 #[derive(Clone, Debug, Default)]
 struct MethodAttributes {
@@ -36,8 +40,7 @@ impl MethodAttributes {
             if attr.path.is_ident("stream") {
                 attrs.stream = Some(attr.clone());
                 false
-            }
-            else {
+            } else {
                 true
             }
         });
@@ -45,7 +48,6 @@ impl MethodAttributes {
         attrs
     }
 }
-
 
 pub(crate) struct RpcMethod<'a> {
     signature: &'a Signature,
@@ -55,9 +57,13 @@ pub(crate) struct RpcMethod<'a> {
     attrs: MethodAttributes,
 }
 
-
 impl<'a> RpcMethod<'a> {
-    pub fn new(signature: &'a Signature, args_struct_prefix: &'a str, attrs: &'a mut Vec<Attribute>, rename_all: &Option<RenameAll>) -> Self {
+    pub fn new(
+        signature: &'a Signature,
+        args_struct_prefix: &'a str,
+        attrs: &'a mut Vec<Attribute>,
+        rename_all: &Option<RenameAll>,
+    ) -> Self {
         let mut has_self = false;
         let mut args = vec![];
 
@@ -65,14 +71,14 @@ impl<'a> RpcMethod<'a> {
             match arg {
                 FnArg::Receiver(_) => {
                     has_self = true;
-                },
+                }
                 FnArg::Typed(pat_type) => {
                     let ident = match &*pat_type.pat {
                         Pat::Ident(ty) => &ty.ident,
                         _ => panic!("Arguments must not be patterns."),
                     };
                     args.push((ident, &*pat_type.ty));
-                },
+                }
             }
         }
 
@@ -87,7 +93,7 @@ impl<'a> RpcMethod<'a> {
         let method_name = rename_all
             .as_ref()
             .map(|r| r.rename(&method_name))
-                .unwrap_or(method_name);
+            .unwrap_or(method_name);
         let method_name_literal = Literal::string(&method_name);
 
         let args_struct_ident = format_ident!("{}_{}", args_struct_prefix, signature.ident);
@@ -102,7 +108,9 @@ impl<'a> RpcMethod<'a> {
     }
 
     pub fn generate_args_struct(&self) -> TokenStream {
-        let struct_fields = self.args.iter()
+        let struct_fields = self
+            .args
+            .iter()
             .map(|(ident, ty)| quote! { #ident: #ty, })
             .collect::<Vec<TokenStream>>();
         let args_struct_ident = &self.args_struct_ident;
@@ -121,7 +129,8 @@ impl<'a> RpcMethod<'a> {
     }
 
     pub fn generate_dispatcher_match_arm(&self) -> TokenStream {
-        let method_args = self.args
+        let method_args = self
+            .args
             .iter()
             .map(|(ident, _)| quote! { params.#ident })
             .collect::<Vec<TokenStream>>();
@@ -154,8 +163,7 @@ impl<'a> RpcMethod<'a> {
                     }
                 }
             }
-        }
-        else {
+        } else {
             quote! {
                 #method_name_literal => {
                     return ::nimiq_jsonrpc_server::dispatch_method_with_args(
@@ -172,7 +180,7 @@ impl<'a> RpcMethod<'a> {
     pub fn generate_dispatcher_method_matcher(&self) -> TokenStream {
         let method_name_literal = &self.method_name_literal;
 
-        quote!{ #method_name_literal => true, }
+        quote! { #method_name_literal => true, }
     }
 
     pub fn generate_proxy_method(&self) -> TokenStream {
@@ -182,21 +190,23 @@ impl<'a> RpcMethod<'a> {
         let output = &self.signature.output;
         //println!("Generating proxy method: {}", method_ident);
 
-        let method_args = self.args.iter()
+        let method_args = self
+            .args
+            .iter()
             .map(|(ident, ty)| quote! { #ident: #ty })
             .collect::<Vec<TokenStream>>();
 
-        let struct_fields = self.args.iter()
+        let struct_fields = self
+            .args
+            .iter()
             .map(|(ident, _)| quote! { #ident })
             .collect::<Vec<TokenStream>>();
-
 
         let transform_return_value = if self.attrs.stream.is_some() {
             quote! {
                 let return_value = self.client.connect_stream(return_value).await;
             }
-        }
-        else {
+        } else {
             quote! {}
         };
 

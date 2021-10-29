@@ -1,10 +1,9 @@
 use darling::FromMeta;
 use proc_macro2::TokenStream;
-use syn::{parse_macro_input, AttributeArgs, TraitItem, ItemTrait};
-use quote::{quote, format_ident};
+use quote::{format_ident, quote};
+use syn::{parse_macro_input, AttributeArgs, ItemTrait, TraitItem};
 
-use crate::{RpcMethod, RenameAll};
-
+use crate::{RenameAll, RpcMethod};
 
 /// Parses `#[proxy(...)]`
 #[derive(Clone, Debug, Default, FromMeta)]
@@ -14,14 +13,18 @@ struct ProxyMeta {
     rename_all: Option<String>,
 }
 
-
-pub fn proxy_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn proxy_macro(
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
     let attr_args = parse_macro_input!(args as AttributeArgs);
     let mut tr = parse_macro_input!(input as ItemTrait);
 
     let args = match ProxyMeta::from_list(&attr_args) {
         Ok(v) => v,
-        Err(e) => { return proc_macro::TokenStream::from(e.write_errors()); }
+        Err(e) => {
+            return proc_macro::TokenStream::from(e.write_errors());
+        }
     };
 
     //println!("args: {:#?}", args);
@@ -36,7 +39,6 @@ pub fn proxy_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStream
         #proxy_impl
     })
 }
-
 
 fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
     let trait_ident = &tr.ident;
@@ -54,13 +56,16 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
     let mut args_structs = vec![];
     let mut method_impls = vec![];
 
-    let rename_all: Option<RenameAll> = args.rename_all
-        .as_ref()
-        .map(|r| r.parse().unwrap());
+    let rename_all: Option<RenameAll> = args.rename_all.as_ref().map(|r| r.parse().unwrap());
 
     for item in &mut tr.items {
         if let TraitItem::Method(method) = item {
-            let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs, &rename_all);
+            let method = RpcMethod::new(
+                &method.sig,
+                &args_struct_prefix,
+                &mut method.attrs,
+                &rename_all,
+            );
 
             let method_code = method.generate_proxy_method();
 
@@ -100,5 +105,4 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
             #(#method_impls)*
         }
     }
-
 }

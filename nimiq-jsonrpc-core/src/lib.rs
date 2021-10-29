@@ -1,17 +1,15 @@
 use std::{
-    ops::RangeInclusive,
     convert::TryFrom,
     fmt::{Display, Formatter},
+    ops::RangeInclusive,
 };
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-
 pub const JSONRPC_VERSION: &'static str = "2.0";
-pub const JSONRPC_RESERVED_ERROR_CODES: RangeInclusive<i64> = -32768 ..= -32000;
-
+pub const JSONRPC_RESERVED_ERROR_CODES: RangeInclusive<i64> = -32768..=-32000;
 
 trait IntoRpcError {
     fn into_rpc_error(self) -> Option<RpcError>;
@@ -19,16 +17,13 @@ trait IntoRpcError {
 
 impl IntoRpcError for serde_json::Error {
     fn into_rpc_error(self) -> Option<RpcError> {
-        Some(RpcError::internal_error(Some(
-            serde_json::json!({
-                "line": self.line(),
-                "column": self.column(),
-                "classify": format!("{:?}", self.classify()),
-            })
-        )))
+        Some(RpcError::internal_error(Some(serde_json::json!({
+            "line": self.line(),
+            "column": self.column(),
+            "classify": format!("{:?}", self.classify()),
+        }))))
     }
 }
-
 
 /// An error of this JSON-RPC implementation. This can be either an error object returned by the server, or
 /// any other error that might be triggered in the server or client (e.g. a network error).
@@ -56,13 +51,10 @@ impl IntoRpcError for Error {
             Error::JsonRpc(e) => Some(e),
             Error::Json(e) => e.into_rpc_error(),
             Error::InvalidResponse => None,
-            Error::InvalidSubscriptionId(id) => {
-                Some(RpcError::internal_error(Some(id)))
-            },
+            Error::InvalidSubscriptionId(id) => Some(RpcError::internal_error(Some(id))),
         }
     }
 }
-
 
 /// A JSON-RPC request or response can either be a single request or response, or a list of the former. This `enum`
 /// matches either for serialization and deserialization.
@@ -73,7 +65,7 @@ impl IntoRpcError for Error {
 #[serde(untagged)]
 pub enum SingleOrBatch<T> {
     Single(T),
-    Batch(Vec<T>)
+    Batch(Vec<T>),
 }
 
 /// Enum that is either a request or response object.
@@ -133,17 +125,19 @@ impl Request {
         }
     }
 
-    pub fn build<P, I>(method: String, params_opt: Option<&P>, id_opt: Option<&I>) -> Result<Self, Error>
-        where
-            P: Serialize,
-            I: Serialize,
+    pub fn build<P, I>(
+        method: String,
+        params_opt: Option<&P>,
+        id_opt: Option<&I>,
+    ) -> Result<Self, Error>
+    where
+        P: Serialize,
+        I: Serialize,
     {
         let params = params_opt
             .map(|params| serde_json::to_value(params))
             .transpose()?;
-        let id = id_opt
-            .map(|id| serde_json::to_value(id))
-            .transpose()?;
+        let id = id_opt.map(|id| serde_json::to_value(id)).transpose()?;
 
         Ok(Self::new(method, params, id))
     }
@@ -152,20 +146,29 @@ impl Request {
     /// `RpcError` object with the appropriate error to reply with.
     pub fn verify(&self) -> Result<(), RpcError> {
         if self.jsonrpc != JSONRPC_VERSION {
-            return Err(RpcError::invalid_request(Some(format!("Field 'jsonrpc' must be '2.0', but was '{}'", self.jsonrpc))))
+            return Err(RpcError::invalid_request(Some(format!(
+                "Field 'jsonrpc' must be '2.0', but was '{}'",
+                self.jsonrpc
+            ))));
         }
 
         match &self.id {
-            Some(Value::String(_)) => {}, // Ok
+            Some(Value::String(_)) => {} // Ok
             Some(Value::Number(n)) => {
                 if n.is_f64() {
-                    return Err(RpcError::invalid_request(Some(format!("Field 'id' is a number, but should not be fractional: {:?}", self.id))))
+                    return Err(RpcError::invalid_request(Some(format!(
+                        "Field 'id' is a number, but should not be fractional: {:?}",
+                        self.id
+                    ))));
                 }
                 // otherwise numbers are ok.
-            },
+            }
             _ => {
-                return Err(RpcError::invalid_request(Some(format!("Invalid type in field 'id': {:?}", self.id))))
-            },
+                return Err(RpcError::invalid_request(Some(format!(
+                    "Invalid type in field 'id': {:?}",
+                    self.id
+                ))))
+            }
         }
 
         Ok(())
@@ -228,8 +231,8 @@ impl Response {
 
     /// Creates a response object from a [[std::result::Result]].
     pub fn from_result<R>(id: Value, result: Result<R, RpcError>) -> Result<Self, Error>
-        where
-            R: Serialize,
+    where
+        R: Serialize,
     {
         Ok(match result {
             Ok(result) => Self::new_success(id, serde_json::to_value(&result)?),
@@ -239,19 +242,13 @@ impl Response {
 
     /// Converts the response object to a [[std::result::Result]]
     pub fn into_result<R>(self) -> Result<R, Error>
-        where
-            R: for<'de> Deserialize<'de>,
+    where
+        R: for<'de> Deserialize<'de>,
     {
         match (self.result, self.error) {
-            (Some(result), None) => {
-                Ok(serde_json::from_value(result)?)
-            },
-            (None, Some(error)) => {
-                Err(error.into())
-            }
-            _ => {
-                Err(Error::InvalidResponse)
-            }
+            (Some(result), None) => Ok(serde_json::from_value(result)?),
+            (None, Some(error)) => Err(error.into()),
+            _ => Err(Error::InvalidResponse),
         }
     }
 
@@ -260,10 +257,8 @@ impl Response {
     }
 }
 
-
 /// Numeric error code used in error objects.
 pub type ErrorCode = i64;
-
 
 /// An error object that can be returned by the server.
 ///
@@ -302,7 +297,11 @@ impl RpcError {
         }
     }
 
-    fn new_reserved_with_description(code: i64, message: &'static str, description: Option<String>) -> Self {
+    fn new_reserved_with_description(
+        code: i64,
+        message: &'static str,
+        description: Option<String>,
+    ) -> Self {
         Self {
             code,
             message: Some(message.to_owned()),
@@ -360,11 +359,10 @@ impl TryFrom<Value> for SubscriptionId {
     fn try_from(value: Value) -> Result<Self, Error> {
         match value {
             Value::String(s) => Ok(SubscriptionId::String(s)),
-            Value::Number(n) => {
-                n.as_u64()
-                    .map(|n| SubscriptionId::Number(n))
-                    .ok_or_else(|| Error::InvalidSubscriptionId(Value::Number(n)))
-            },
+            Value::Number(n) => n
+                .as_u64()
+                .map(|n| SubscriptionId::Number(n))
+                .ok_or_else(|| Error::InvalidSubscriptionId(Value::Number(n))),
             value @ _ => Err(Error::InvalidSubscriptionId(value)),
         }
     }

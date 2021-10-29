@@ -1,11 +1,10 @@
-use async_trait::async_trait;
-use tokio::time::Duration;
-use futures::stream::{BoxStream, StreamExt};
 use async_stream::stream;
+use async_trait::async_trait;
+use futures::stream::{BoxStream, StreamExt};
+use tokio::time::Duration;
 
-use nimiq_jsonrpc_server::{Server, Config};
 use nimiq_jsonrpc_client::websocket::WebsocketClient;
-
+use nimiq_jsonrpc_server::{Config, Server};
 
 #[nimiq_jsonrpc_derive::proxy(name = "HelloWorldProxy")]
 #[async_trait]
@@ -36,7 +35,6 @@ impl HelloWorld for HelloWorldService {
             }
         };
 
-
         Ok(stream.boxed())
     }
 }
@@ -63,5 +61,4 @@ async fn main() {
     while let Some(item) = stream.next().await {
         println!("Received item from stream: {}", item);
     }
-
 }

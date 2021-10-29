@@ -1,10 +1,9 @@
 use darling::FromMeta;
 use proc_macro2::TokenStream;
-use syn::{parse_macro_input, AttributeArgs, Type, ItemImpl, ImplItem};
 use quote::quote;
+use syn::{parse_macro_input, AttributeArgs, ImplItem, ItemImpl, Type};
 
-use crate::{RpcMethod, RenameAll};
-
+use crate::{RenameAll, RpcMethod};
 
 /// Parses `#[service(...)]`
 #[derive(Clone, Debug, Default, FromMeta)]
@@ -13,14 +12,18 @@ struct ServiceMeta {
     rename_all: Option<String>,
 }
 
-
-pub fn service_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn service_macro(
+    args: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
     let attr_args = parse_macro_input!(args as AttributeArgs);
     let mut im = parse_macro_input!(input as ItemImpl);
 
     let args = match ServiceMeta::from_list(&attr_args) {
         Ok(v) => v,
-        Err(e) => { return proc_macro::TokenStream::from(e.write_errors()); }
+        Err(e) => {
+            return proc_macro::TokenStream::from(e.write_errors());
+        }
     };
 
     //println!("args: {:#?}", args);
@@ -36,7 +39,6 @@ pub fn service_macro(args: proc_macro::TokenStream, input: proc_macro::TokenStre
     })
 }
 
-
 fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
     let mut args_structs = vec![];
     let mut match_arms = vec![];
@@ -51,13 +53,16 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
     let struct_name = &struct_path.segments.last().unwrap().ident;
     let args_struct_prefix = format!("ServiceArgs_{}", struct_name);
 
-    let rename_all: Option<RenameAll> = args.rename_all
-        .as_ref()
-        .map(|r| r.parse().unwrap());
+    let rename_all: Option<RenameAll> = args.rename_all.as_ref().map(|r| r.parse().unwrap());
 
     for item in &mut im.items {
         if let ImplItem::Method(method) = item {
-            let method = RpcMethod::new(&method.sig, &args_struct_prefix, &mut method.attrs, &rename_all);
+            let method = RpcMethod::new(
+                &method.sig,
+                &args_struct_prefix,
+                &mut method.attrs,
+                &rename_all,
+            );
 
             let match_arm = method.generate_dispatcher_match_arm();
             let method_name_lit = &method.method_name_literal;
@@ -68,7 +73,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
             args_structs.push(method.generate_args_struct());
             match_arms.push(match_arm);
             name_match_arms.push(method.generate_dispatcher_method_matcher());
-            method_names.push(quote!{ #method_name_lit });
+            method_names.push(quote! { #method_name_lit });
         }
     }
 

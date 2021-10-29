@@ -23,7 +23,6 @@
 #![warn(missing_docs)]
 #![warn(missing_doc_code_examples)]
 
-
 /// An implementation of JSON-RPC over HTTP post requests. Feature `http` must be enabled:
 ///
 /// ```toml
@@ -47,24 +46,13 @@ pub mod websocket;
 #[cfg(feature = "wasm-websocket-client")]
 pub mod wasm_websocket;
 
+use std::{fmt::Debug, sync::Arc};
 
-use std::{
-    fmt::Debug,
-    sync::Arc,
-};
-
-use serde::{
-    ser::Serialize,
-    de::Deserialize,
-};
 use async_trait::async_trait;
-use futures::{
-    stream::BoxStream,
-    lock::Mutex,
-};
+use futures::{lock::Mutex, stream::BoxStream};
+use serde::{de::Deserialize, ser::Serialize};
 
 use nimiq_jsonrpc_core::SubscriptionId;
-
 
 #[async_trait]
 /// This trait must be implemented by the client's transport. It is responsible to send the request and return the
@@ -92,8 +80,9 @@ pub trait Client {
     /// client-side error (e.g. a network error), or an error object sent by the server.
     ///
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
-        where P: Serialize + Debug + Send + Sync,
-              R: for<'de> Deserialize<'de> + Debug + Send + Sync;
+    where
+        P: Serialize + Debug + Send + Sync,
+        R: for<'de> Deserialize<'de> + Debug + Send + Sync;
 
     /// If the client supports streams (i.e. receiving notifications), this should return a stream for the specific
     /// subscription ID.
@@ -110,10 +99,13 @@ pub trait Client {
     ///
     /// If the client doesn't support receiving notifications, this method is allowed to panic.
     ///
-    async fn connect_stream<T: Unpin + 'static>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
-        where T: for<'de> Deserialize<'de> + Debug + Send + Sync;
+    async fn connect_stream<T: Unpin + 'static>(
+        &mut self,
+        id: SubscriptionId,
+    ) -> BoxStream<'static, T>
+    where
+        T: for<'de> Deserialize<'de> + Debug + Send + Sync;
 }
-
 
 /// Wraps a client into an `Arc<Mutex<_>>`, so that it can be cloned.
 pub struct ArcClient<C> {
@@ -125,14 +117,19 @@ impl<C: Client + Send> Client for ArcClient<C> {
     type Error = <C as Client>::Error;
 
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
-        where P: Serialize + Debug + Send + Sync,
-              R: for<'de> Deserialize<'de> + Debug + Send + Sync
+    where
+        P: Serialize + Debug + Send + Sync,
+        R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         self.inner.lock().await.send_request(method, params).await
     }
 
-    async fn connect_stream<T: Unpin + 'static>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
-        where T: for<'de> Deserialize<'de> + Debug + Send + Sync
+    async fn connect_stream<T: Unpin + 'static>(
+        &mut self,
+        id: SubscriptionId,
+    ) -> BoxStream<'static, T>
+    where
+        T: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         self.inner.lock().await.connect_stream(id).await
     }
@@ -150,7 +147,7 @@ impl<C: Client> ArcClient<C> {
 impl<C> Clone for ArcClient<C> {
     fn clone(&self) -> Self {
         ArcClient {
-            inner: Arc::clone(&self.inner)
+            inner: Arc::clone(&self.inner),
         }
     }
 }

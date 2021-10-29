@@ -1,27 +1,25 @@
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    fmt::Debug
-};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
-use tokio::{
-    sync::{mpsc, oneshot, RwLock},
-    net::TcpStream,
-};
-use thiserror::Error;
-use url::Url;
-use serde::{Serialize, Deserialize};
-use futures::{
-    stream::{BoxStream, StreamExt, SplitSink},
-    sink::SinkExt,
-};
-use serde_json::Value;
-use tokio_tungstenite::tungstenite::Message;
 use async_trait::async_trait;
+use futures::{
+    sink::SinkExt,
+    stream::{BoxStream, SplitSink, StreamExt},
+};
 use http::Request as HttpRequest;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use thiserror::Error;
+use tokio::{
+    net::TcpStream,
+    sync::{mpsc, oneshot, RwLock},
+};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+use url::Url;
 
-use nimiq_jsonrpc_core::{Request, Response, RequestOrResponse, SubscriptionMessage, SubscriptionId, Credentials};
+use nimiq_jsonrpc_core::{
+    Credentials, Request, RequestOrResponse, Response, SubscriptionId, SubscriptionMessage,
+};
 
 use crate::Client;
 
@@ -53,7 +51,6 @@ pub enum Error {
     MpscSend(#[from] mpsc::error::SendError<SubscriptionMessage<Value>>),
 }
 
-
 type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value>>>;
 type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
 
@@ -70,7 +67,6 @@ pub struct WebsocketClient {
     next_id: u64,
 }
 
-
 impl WebsocketClient {
     /// Creates a new JSON-RPC websocket client.
     ///
@@ -85,7 +81,10 @@ impl WebsocketClient {
             let mut request_builder = HttpRequest::get(uri);
 
             if let Some(basic_auth) = basic_auth {
-                let header_value = format!("Basic {}", base64::encode(&format!("{}:{}", basic_auth.username, basic_auth.password)));
+                let header_value = format!(
+                    "Basic {}",
+                    base64::encode(&format!("{}:{}", basic_auth.username, basic_auth.password))
+                );
                 request_builder = request_builder.header("Authorization", header_value);
             }
 
@@ -109,7 +108,9 @@ impl WebsocketClient {
                 while let Some(message_result) = ws_rx.next().await {
                     match message_result {
                         Ok(message) => {
-                            if let Err(e) = Self::handle_websocket_message(&streams, &requests, message).await {
+                            if let Err(e) =
+                                Self::handle_websocket_message(&streams, &requests, message).await
+                            {
                                 log::error!("{}", e);
                             }
                         }
@@ -139,7 +140,11 @@ impl WebsocketClient {
         Ok(Self::new(url, None).await?)
     }
 
-    async fn handle_websocket_message(streams: &Arc<RwLock<StreamsMap>>, requests: &Arc<RwLock<RequestsMap>>, message: Message) -> Result<(), Error> {
+    async fn handle_websocket_message(
+        streams: &Arc<RwLock<StreamsMap>>,
+        requests: &Arc<RwLock<RequestsMap>>,
+        message: Message,
+    ) -> Result<(), Error> {
         // FIXME: This will also accept pings
         let data = message.into_text()?;
 
@@ -151,8 +156,7 @@ impl WebsocketClient {
             RequestOrResponse::Request(request) => {
                 if request.id.is_some() {
                     log::error!("Received unexpected request, which is not a notification.");
-                }
-                else {
+                } else {
                     if let Some(params) = request.params {
                         let message: SubscriptionMessage<Value> = serde_json::from_value(params)
                             .expect("Failed to deserialize request parameters");
@@ -160,24 +164,24 @@ impl WebsocketClient {
                         let mut streams = streams.write().await;
                         if let Some(tx) = streams.get_mut(&message.subscription) {
                             tx.send(message).await?;
+                        } else {
+                            log::error!(
+                                "Notification for unknown stream ID: {}",
+                                message.subscription
+                            );
                         }
-                        else {
-                            log::error!("Notification for unknown stream ID: {}", message.subscription);
-                        }
-                    }
-                    else {
+                    } else {
                         log::error!("No 'params' field in notification.");
                     }
                 }
-            },
+            }
             RequestOrResponse::Response(response) => {
                 let mut requests = requests.write().await;
 
                 if let Some(tx) = response.id.as_u64().and_then(|id| requests.remove(&id)) {
                     drop(requests);
                     tx.send(response).ok();
-                }
-                else {
+                } else {
                     log::error!("Response for unknown request ID: {}", response.id);
                 }
             }
@@ -192,9 +196,9 @@ impl Client for WebsocketClient {
     type Error = Error;
 
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
-        where
-            P: Serialize + Debug + Send + Sync,
-            R: for<'de> Deserialize<'de> + Debug + Send + Sync
+    where
+        P: Serialize + Debug + Send + Sync,
+        R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let request_id = self.next_id;
         self.next_id += 1;
@@ -202,7 +206,9 @@ impl Client for WebsocketClient {
         let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
 
-        self.sender.send(Message::Binary(serde_json::to_vec(&request)?)).await?;
+        self.sender
+            .send(Message::Binary(serde_json::to_vec(&request)?))
+            .await?;
 
         let (tx, rx) = oneshot::channel();
 
@@ -212,9 +218,12 @@ impl Client for WebsocketClient {
         Ok(rx.await?.into_result()?)
     }
 
-    async fn connect_stream<T: Unpin + 'static>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
-        where
-            T: for<'de> Deserialize<'de> + Debug + Send + Sync
+    async fn connect_stream<T: Unpin + 'static>(
+        &mut self,
+        id: SubscriptionId,
+    ) -> BoxStream<'static, T>
+    where
+        T: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let (tx, mut rx) = mpsc::channel(16);
 

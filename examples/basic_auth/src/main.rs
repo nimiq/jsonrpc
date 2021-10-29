@@ -1,20 +1,18 @@
 use std::env;
 
 use async_trait::async_trait;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use nimiq_jsonrpc_server::{Server, Config};
 use nimiq_jsonrpc_client::http::HttpClient;
 use nimiq_jsonrpc_client::websocket::WebsocketClient;
 use nimiq_jsonrpc_core::Credentials;
-
+use nimiq_jsonrpc_server::{Config, Server};
 
 /// You can pass custom types over JSON-RPC, if they implement Serialize and Deserialize.
 #[derive(Debug, Serialize, Deserialize)]
 struct HelloWorldData {
     a: u32,
 }
-
 
 /// The trait that defines the RPC interface.
 ///
@@ -56,7 +54,10 @@ impl HelloWorld for HelloWorldService {
 async fn main() {
     dotenv::dotenv().ok();
     if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "info,nimiq_jsonrpc_core=debug,nimiq_jsonrpc_server=debug,nimiq_jsonrpc_client=debug");
+        env::set_var(
+            "RUST_LOG",
+            "info,nimiq_jsonrpc_core=debug,nimiq_jsonrpc_server=debug,nimiq_jsonrpc_client=debug",
+        );
     }
 
     pretty_env_logger::init();
@@ -81,19 +82,19 @@ async fn main() {
         Some(credentials.clone()),
     );
     let mut proxy = HelloWorldProxy::new(client);
-    let retval = proxy.hello("World".to_owned(), HelloWorldData { a: 42 })
+    let retval = proxy
+        .hello("World".to_owned(), HelloWorldData { a: 42 })
         .await
         .expect("RPC call failed");
     log::info!("RPC call returned: {}", retval);
 
     // Over websocket
-    let client = WebsocketClient::new(
-            "ws://localhost:8000/ws".parse().unwrap(),
-            Some(credentials)
-        )
-        .await.unwrap();
+    let client = WebsocketClient::new("ws://localhost:8000/ws".parse().unwrap(), Some(credentials))
+        .await
+        .unwrap();
     let mut proxy = HelloWorldProxy::new(client);
-    let retval = proxy.hello("World".to_owned(), HelloWorldData { a: 42 })
+    let retval = proxy
+        .hello("World".to_owned(), HelloWorldData { a: 42 })
         .await
         .expect("RPC call failed");
     log::info!("RPC call returned: {}", retval);

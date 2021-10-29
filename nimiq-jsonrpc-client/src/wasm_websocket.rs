@@ -4,34 +4,27 @@
 //!
 //! This is still experimental.
 
-use std::{
-    sync::Arc,
-    collections::HashMap,
-    fmt::Debug,
-    cell::RefCell,
-};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, sync::Arc};
 
-use tokio::{
-    sync::{mpsc, oneshot, RwLock},
-};
+use async_trait::async_trait;
+use futures::stream::{BoxStream, StreamExt};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
-use serde::{Serialize, Deserialize};
-use futures::stream::{BoxStream, StreamExt};
-use async_trait::async_trait;
+use tokio::sync::{mpsc, oneshot, RwLock};
 use url::Url;
 
-use wasm_bindgen::{JsCast, JsValue, closure::Closure};
-use web_sys::{WebSocket, MessageEvent, ErrorEvent};
+use wasm_bindgen::{closure::Closure, JsCast, JsValue};
+use web_sys::{ErrorEvent, MessageEvent, WebSocket};
 
-use nimiq_jsonrpc_core::{Request, Response, RequestOrResponse, SubscriptionMessage, SubscriptionId};
+use nimiq_jsonrpc_core::{
+    Request, RequestOrResponse, Response, SubscriptionId, SubscriptionMessage,
+};
 
 use crate::Client;
 
-
 type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value>>>;
 type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
-
 
 /// Error type for this client
 #[derive(Debug, Error)]
@@ -63,7 +56,6 @@ impl From<JsValue> for Error {
     }
 }
 
-
 /// A JSON-RPC client over a Javascript websocket
 ///
 pub struct WebsocketClient {
@@ -72,7 +64,6 @@ pub struct WebsocketClient {
     next_id: u64,
     sender: mpsc::Sender<Vec<u8>>,
 }
-
 
 impl WebsocketClient {
     /// Creates a new websocket client, connecting to the specified url.
@@ -98,10 +89,11 @@ impl WebsocketClient {
                     let requests = Arc::clone(&requests);
 
                     wasm_bindgen_futures::spawn_local(async move {
-                        Self::handle_websocket_message(&streams, &requests, data).await.unwrap();
+                        Self::handle_websocket_message(&streams, &requests, data)
+                            .await
+                            .unwrap();
                     })
-                }
-                else {
+                } else {
                     log::error!("Failed to cast message");
                 }
             }) as Box<dyn FnMut(MessageEvent)>)
@@ -148,7 +140,11 @@ impl WebsocketClient {
         })
     }
 
-    async fn handle_websocket_message(streams: &Arc<RwLock<StreamsMap>>, requests: &Arc<RwLock<RequestsMap>>, data: String) -> Result<(), Error> {
+    async fn handle_websocket_message(
+        streams: &Arc<RwLock<StreamsMap>>,
+        requests: &Arc<RwLock<RequestsMap>>,
+        data: String,
+    ) -> Result<(), Error> {
         log::trace!("Received message: {:?}", data);
 
         let message = RequestOrResponse::from_str(&data)?;
@@ -157,8 +153,7 @@ impl WebsocketClient {
             RequestOrResponse::Request(request) => {
                 if request.id.is_some() {
                     log::error!("Received unexpected request, which is not a notification.");
-                }
-                else {
+                } else {
                     if let Some(params) = request.params {
                         let message: SubscriptionMessage<Value> = serde_json::from_value(params)
                             .expect("Failed to deserialize request parameters");
@@ -166,24 +161,24 @@ impl WebsocketClient {
                         let mut streams = streams.write().await;
                         if let Some(tx) = streams.get_mut(&message.subscription) {
                             tx.send(message).await?;
+                        } else {
+                            log::error!(
+                                "Notification for unknown stream ID: {}",
+                                message.subscription
+                            );
                         }
-                        else {
-                            log::error!("Notification for unknown stream ID: {}", message.subscription);
-                        }
-                    }
-                    else {
+                    } else {
                         log::error!("No 'params' field in notification.");
                     }
                 }
-            },
+            }
             RequestOrResponse::Response(response) => {
                 let mut requests = requests.write().await;
 
                 if let Some(tx) = response.id.as_u64().and_then(|id| requests.remove(&id)) {
                     drop(requests);
                     tx.send(response).ok();
-                }
-                else {
+                } else {
                     log::error!("Response for unknown request ID: {}", response.id);
                 }
             }
@@ -198,9 +193,9 @@ impl Client for WebsocketClient {
     type Error = Error;
 
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
-        where
-            P: Serialize + Debug + Send + Sync,
-            R: for<'de> Deserialize<'de> + Debug + Send + Sync
+    where
+        P: Serialize + Debug + Send + Sync,
+        R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let request_id = self.next_id;
         self.next_id += 1;
@@ -208,7 +203,10 @@ impl Client for WebsocketClient {
         let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
 
-        self.sender.send(serde_json::to_vec(&request)?).await.unwrap();
+        self.sender
+            .send(serde_json::to_vec(&request)?)
+            .await
+            .unwrap();
 
         let (tx, rx) = oneshot::channel();
 
@@ -220,9 +218,12 @@ impl Client for WebsocketClient {
         Ok(rx.await?.into_result()?)
     }
 
-    async fn connect_stream<T: Unpin + 'static>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
-        where
-            T: for<'de> Deserialize<'de> + Debug + Send + Sync
+    async fn connect_stream<T: Unpin + 'static>(
+        &mut self,
+        id: SubscriptionId,
+    ) -> BoxStream<'static, T>
+    where
+        T: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let (tx, mut rx) = mpsc::channel(16);
 

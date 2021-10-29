@@ -1,18 +1,16 @@
 use std::env;
 
 use async_trait::async_trait;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use nimiq_jsonrpc_server::{Server, Config};
 use nimiq_jsonrpc_client::http::HttpClient;
-
+use nimiq_jsonrpc_server::{Config, Server};
 
 /// You can pass custom types over JSON-RPC, if they implement Serialize and Deserialize.
 #[derive(Debug, Serialize, Deserialize)]
 struct HelloWorldData {
     a: u32,
 }
-
 
 /// The trait that defines the RPC interface.
 ///
@@ -57,7 +55,10 @@ async fn main() {
 
     // Default to displaying our debug messages, and only info messages otherwise.
     if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "info,nimiq_jsonrpc_core=debug,nimiq_jsonrpc_server=debug,nimiq_jsonrpc_client=debug");
+        env::set_var(
+            "RUST_LOG",
+            "info,nimiq_jsonrpc_core=debug,nimiq_jsonrpc_server=debug,nimiq_jsonrpc_client=debug",
+        );
     }
 
     pretty_env_logger::init();
@@ -87,7 +88,8 @@ async fn main() {
 
     // The proxy implements our `HelloWorld` RPC interface and will send a request to the server, when a method is
     // called.
-    let retval = proxy.hello("World".to_owned(), HelloWorldData { a: 42 })
+    let retval = proxy
+        .hello("World".to_owned(), HelloWorldData { a: 42 })
         .await
         .expect("RPC call failed");
     log::info!("RPC call returned: {}", retval);

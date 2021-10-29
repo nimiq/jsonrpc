@@ -1,19 +1,15 @@
 use std::fmt::Debug;
 
-use serde::{
-    ser::Serialize,
-    de::Deserialize,
-};
-use serde_json::Value;
 use async_trait::async_trait;
-use thiserror::Error;
 use futures::stream::BoxStream;
+use serde::{de::Deserialize, ser::Serialize};
+use serde_json::Value;
+use thiserror::Error;
 use url::Url;
 
-use nimiq_jsonrpc_core::{Request, Response, SubscriptionId, Credentials};
+use nimiq_jsonrpc_core::{Credentials, Request, Response, SubscriptionId};
 
 use crate::Client;
-
 
 /// Error that might be returned by the http client.
 #[derive(Debug, Error)]
@@ -34,9 +30,8 @@ pub enum Error {
 
         /// The ID that the server replied with.
         got: Value,
-    }
+    },
 }
-
 
 /// A JSON-HTTP client that sends the request via HTTP POST to an URL.
 pub struct HttpClient {
@@ -80,8 +75,9 @@ impl Client for HttpClient {
     type Error = Error;
 
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Error>
-        where P: Serialize + Debug + Send + Sync,
-              R: for<'de> Deserialize<'de> + Debug + Send + Sync,
+    where
+        P: Serialize + Debug + Send + Sync,
+        R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let request_id = self.next_id;
         self.next_id += 1;
@@ -94,7 +90,8 @@ impl Client for HttpClient {
         let mut request_builder = self.client.post(self.url.clone());
 
         if let Some(basic_auth) = &self.basic_auth {
-            request_builder = request_builder.basic_auth(&basic_auth.username, Some(&basic_auth.password));
+            request_builder =
+                request_builder.basic_auth(&basic_auth.username, Some(&basic_auth.password));
         }
 
         let response: Response = request_builder
@@ -108,9 +105,11 @@ impl Client for HttpClient {
         log::debug!("Received response: {:?}", response);
 
         if response.id != Value::Number(request_id.into()) {
-            Err(Error::IdMismatch { expected: request_id, got: response.id })
-        }
-        else {
+            Err(Error::IdMismatch {
+                expected: request_id,
+                got: response.id,
+            })
+        } else {
             Ok(response.into_result()?)
         }
     }
