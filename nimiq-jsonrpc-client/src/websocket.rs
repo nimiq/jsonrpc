@@ -237,11 +237,25 @@ impl Client for WebsocketClient {
 
         let stream = async_stream::stream! {
             loop {
-                let message = rx.recv().await.unwrap();
-                yield serde_json::from_value(message.result).unwrap();
+                if let Some(message) = rx.recv().await {
+                    yield serde_json::from_value(message.result).unwrap();
+                } else {
+                    break;
+                }
             }
         };
 
         stream.boxed()
+    }
+
+    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error> {
+        if let Some(tx) = self.streams.write().await.remove(&id) {
+            log::debug!("Closing stream of subscription ID: {}", id);
+            drop(tx);
+        } else {
+            log::error!("Unknown subscription ID: {}", id);
+        }
+
+        Ok(())
     }
 }

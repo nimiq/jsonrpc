@@ -1,9 +1,11 @@
+use std::env;
+
 use async_stream::stream;
 use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
 use tokio::time::Duration;
 
-use nimiq_jsonrpc_client::websocket::WebsocketClient;
+use nimiq_jsonrpc_client::{websocket::WebsocketClient, Client};
 use nimiq_jsonrpc_server::{Config, Server};
 
 #[nimiq_jsonrpc_derive::proxy(name = "HelloWorldProxy")]
@@ -42,6 +44,13 @@ impl HelloWorld for HelloWorldService {
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
+    if env::var("RUST_LOG").is_err() {
+        env::set_var(
+            "RUST_LOG",
+            "info,nimiq_jsonrpc_core=debug,nimiq_jsonrpc_server=debug,nimiq_jsonrpc_client=debug",
+        );
+    }
+
     pretty_env_logger::init();
 
     let config = Config::default();
@@ -57,6 +66,16 @@ async fn main() {
     let mut proxy = HelloWorldProxy::new(client);
 
     let mut stream = proxy.hello_subscribe().await.unwrap();
+
+    // Run the test for 5 seconds before closing the stream'
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        println!("Close stream");
+        if let Err(e) = proxy.client.disconnect_stream(1.into()).await {
+            panic!("Error while disconnecting stream: {}", e)
+        };
+    });
 
     while let Some(item) = stream.next().await {
         println!("Received item from stream: {}", item);

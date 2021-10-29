@@ -660,6 +660,11 @@ where
 
             while let Some(item) = stream.next().await {
                 if let Err(e) = forward_notification(item, &mut tx, &id, &method).await {
+                    // Break the loop when the channel is closed
+                    if let Error::Mpsc(_) = e {
+                        break;
+                    }
+
                     log::error!("{}", e);
                 }
             }

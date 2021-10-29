@@ -52,6 +52,7 @@ impl MethodAttributes {
 pub(crate) struct RpcMethod<'a> {
     signature: &'a Signature,
     args: Vec<(&'a Ident, &'a Type)>,
+    method_name: String,
     method_name_literal: Literal,
     args_struct_ident: Ident,
     attrs: MethodAttributes,
@@ -101,6 +102,7 @@ impl<'a> RpcMethod<'a> {
         Self {
             signature,
             args,
+            method_name,
             method_name_literal,
             args_struct_ident,
             attrs,
@@ -136,6 +138,7 @@ impl<'a> RpcMethod<'a> {
             .collect::<Vec<TokenStream>>();
         let args_struct_ident = &self.args_struct_ident;
         let method_ident = &self.signature.ident;
+        let method_name = &self.method_name;
         let method_name_literal = &self.method_name_literal;
 
         if self.attrs.stream.is_some() {
@@ -147,8 +150,7 @@ impl<'a> RpcMethod<'a> {
                             move |params: #args_struct_ident| async move {
                                 let stream = self.#method_ident(#(#method_args),*).await?;
 
-                                // TODO: Take the method name from the attribute
-                                let subscription = ::nimiq_jsonrpc_server::connect_stream(stream, tx, stream_id, "subscription".to_owned());
+                                let subscription = ::nimiq_jsonrpc_server::connect_stream(stream, tx, stream_id, #method_name.to_owned());
 
                                 Ok::<_, ::nimiq_jsonrpc_core::RpcError>(subscription)
                             }

@@ -105,6 +105,23 @@ pub trait Client {
     ) -> BoxStream<'static, T>
     where
         T: for<'de> Deserialize<'de> + Debug + Send + Sync;
+
+    /// If the client supports streams (i.e. receiving notifications) and there is a matching subscription ID, this
+    /// should close the corresponding stream.
+    ///
+    /// # Arguments
+    ///
+    ///  - `id`: The subscription ID
+    ///
+    /// # Returns
+    ///
+    /// Returns a result on whether or not the client was able to unsubscribe from the stream.
+    ///
+    /// # Panics
+    ///
+    /// If the client doesn't support receiving notifications, this method is allowed to panic.
+    ///
+    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error>;
 }
 
 /// Wraps a client into an `Arc<Mutex<_>>`, so that it can be cloned.
@@ -132,6 +149,10 @@ impl<C: Client + Send> Client for ArcClient<C> {
         T: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         self.inner.lock().await.connect_stream(id).await
+    }
+
+    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error> {
+        self.inner.lock().await.disconnect_stream(id).await
     }
 }
 
