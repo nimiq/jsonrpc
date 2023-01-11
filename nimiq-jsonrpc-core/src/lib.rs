@@ -284,6 +284,9 @@ impl std::fmt::Display for RpcError {
         if let Some(message) = &self.message {
             write!(f, ": {}", message)?;
         }
+        if let Some(data) = &self.data {
+            write!(f, " - Caused by:  {}", data)?;
+        }
         Ok(())
     }
 }
