@@ -2,7 +2,7 @@
 //! supports *PubSub*.
 //!
 //! Instead of using a [`Client`] implementation and calling [`Client::send_request`] directly, you can derive a proxy
-//! struct that implements methods for egonomic RPC calling:
+//! struct that implements methods for ergonomic RPC calling:
 //!
 //! ```rust
 //! use async_trait::async_trait;

@@ -142,7 +142,7 @@ impl<D: Dispatcher> Server<D> {
             .and(warp::ws())
             .map(move |ws| Self::upgrade_to_ws(Arc::clone(&inner), ws));
 
-        // Route for backwards-compatiblity to use JSON-RPC over HTTP at /
+        // Route for backwards-compatibility to use JSON-RPC over HTTP at /
         let inner = Arc::clone(&self.inner);
         let post_route = warp::path::end()
             .and(warp::post())
@@ -339,7 +339,7 @@ impl<D: Dispatcher> Server<D> {
 /// using `nimiq_jsonrpc_derive::service`.
 #[async_trait]
 pub trait Dispatcher: Send + Sync + 'static {
-    /// Calls the requested method with the request parameters and returns it's return value (or error) as a resposne.
+    /// Calls the requested method with the request parameters and returns it's return value (or error) as a response.
     async fn dispatch(
         &mut self,
         request: Request,
