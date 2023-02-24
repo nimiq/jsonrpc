@@ -2,7 +2,7 @@
 name = "basic-auth"
 version = "0.1.0"
 authors = ["Janosch Gräf <janosch@nimiq.com>"]
-edition = "2018"
+edition = "2021"
 publish = false
 
 [dependencies]
