@@ -6,14 +6,15 @@ edition = "2021"
 publish = false
 
 [dependencies]
-log = "0.4"
-pretty_env_logger = "0.4.0"
-dotenv = "0.15"
 anyhow = "1.0"
 async-trait = "0.1"
+dotenv = "0.15"
+log = "0.4"
+pretty_env_logger = "0.4.0"
 serde = { version = "1.0 ", features = ["derive"] }
 tokio = { version = "1.25", features = ["sync", "rt-multi-thread", "macros"] }
+
+nimiq-jsonrpc-client = { path = "../../nimiq-jsonrpc-client" }
 nimiq-jsonrpc-core = { path = "../../nimiq-jsonrpc-core" }
 nimiq-jsonrpc-derive = { path = "../../nimiq-jsonrpc-derive" }
-nimiq-jsonrpc-client = { path = "../../nimiq-jsonrpc-client" }
 nimiq-jsonrpc-server = { path = "../../nimiq-jsonrpc-server" }

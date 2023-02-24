@@ -9,10 +9,11 @@ proc-macro = true
 
 [dependencies]
 darling = "0.14"
-syn = { version = "1.0", features = ["full"] }
-quote = "1.0"
-proc-macro2 = "1.0"
 heck = "0.4"
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "1.0", features = ["full"] }
+
+nimiq-jsonrpc-client = { path = "../nimiq-jsonrpc-client" }
 nimiq-jsonrpc-core = { path = "../nimiq-jsonrpc-core" }
 nimiq-jsonrpc-server = { path = "../nimiq-jsonrpc-server" }
-nimiq-jsonrpc-client = { path = "../nimiq-jsonrpc-client" }
