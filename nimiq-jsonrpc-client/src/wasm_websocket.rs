@@ -240,7 +240,7 @@ impl Client for WebsocketClient {
     }
 
     async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error> {
-        if let Some(tx) = self.streams.write().await.remove(id) {
+        if let Some(tx) = self.streams.write().await.remove(&id) {
             log::debug!("Closing stream of subscription ID: {}", id);
             drop(tx);
         } else {
