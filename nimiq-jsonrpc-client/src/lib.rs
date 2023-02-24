@@ -5,12 +5,13 @@
 //! struct that implements methods for egonomic RPC calling:
 //!
 //! ```rust
+//! use async_trait::async_trait;
+//!
 //! #[nimiq_jsonrpc_derive::proxy]
 //! #[async_trait]
 //! trait Foobar {
-//!     async fn hello(&mut self, name: String) -> String;
-//!     async fn bye(&mut self) -> Goodbye;
-//!     //async fn may_fail(&self) -> Result<String, ()>;
+//!     type Error;
+//!     async fn hello(&mut self, name: String) -> Result<String, Self::Error>;
 //! }
 //!```
 //!
@@ -21,7 +22,7 @@
 //!
 
 #![warn(missing_docs)]
-#![warn(missing_doc_code_examples)]
+#![warn(rustdoc::missing_doc_code_examples)]
 
 /// An implementation of JSON-RPC over HTTP post requests. Feature `http` must be enabled:
 ///

@@ -38,6 +38,9 @@ features = [
   "WebSocket",
 ]
 
+[dev-dependencies]
+nimiq-jsonrpc-derive = { path = "../nimiq-jsonrpc-derive" }
+
 [features]
 default = ["websocket-client", "http-client"]
 http-client = ["reqwest"]
