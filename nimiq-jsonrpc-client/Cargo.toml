@@ -12,11 +12,11 @@ log = "0.4"
 thiserror = "1.0"
 async-trait = "0.1"
 reqwest = { version = "0.11", optional = true, features = ["json"] }
-tokio-tungstenite = { version = "0.15", optional = true }
-tokio = { version = "1.9", features = ["net", "sync"], optional = true }
+tokio-tungstenite = { version = "0.18", optional = true }
+tokio = { version = "1.25", features = ["net", "sync"], optional = true }
 http = { version = "0.2", optional = true }
-base64 = { version = "0.12.3", optional = true }
-url = "2.2"
+base64 = { version = "0.21", optional = true }
+url = "2.3"
 serde_json = "1.0"
 futures = "0.3"
 nimiq-jsonrpc-core = { path = "../nimiq-jsonrpc-core" }

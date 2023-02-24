@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use async_trait::async_trait;
+use base64::Engine;
 use futures::{
     sink::SinkExt,
     stream::{BoxStream, SplitSink, StreamExt},
@@ -83,7 +84,8 @@ impl WebsocketClient {
             if let Some(basic_auth) = basic_auth {
                 let header_value = format!(
                     "Basic {}",
-                    base64::encode(&format!("{}:{}", basic_auth.username, basic_auth.password))
+                    base64::prelude::BASE64_STANDARD
+                        .encode(&format!("{}:{}", basic_auth.username, basic_auth.password))
                 );
                 request_builder = request_builder.header("Authorization", header_value);
             }

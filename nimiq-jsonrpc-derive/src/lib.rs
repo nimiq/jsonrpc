@@ -2,7 +2,7 @@ mod proxy;
 mod service;
 
 use darling::FromMeta;
-use heck::{CamelCase, KebabCase, MixedCase, ShoutySnakeCase, SnakeCase};
+use heck::{ToKebabCase, ToLowerCamelCase, ToShoutySnakeCase, ToSnakeCase, ToUpperCamelCase};
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote};
 use syn::{Attribute, FnArg, Ident, Pat, Signature, Type};
@@ -257,9 +257,9 @@ impl FromStr for RenameAll {
 impl RenameAll {
     pub fn rename(&self, name: &str) -> String {
         match self {
-            RenameAll::CamelCase => name.to_camel_case(),
+            RenameAll::CamelCase => name.to_upper_camel_case(),
             RenameAll::KebabCase => name.to_kebab_case(),
-            RenameAll::MixedCase => name.to_mixed_case(),
+            RenameAll::MixedCase => name.to_lower_camel_case(),
             RenameAll::ShoutySnakeCase => name.to_shouty_snake_case(),
             RenameAll::SnakeCase => name.to_snake_case(),
         }
