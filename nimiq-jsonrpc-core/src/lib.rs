@@ -2,13 +2,14 @@ use std::{
     convert::TryFrom,
     fmt::{Display, Formatter},
     ops::RangeInclusive,
+    str::FromStr,
 };
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-pub const JSONRPC_VERSION: &'static str = "2.0";
+pub const JSONRPC_VERSION: &str = "2.0";
 pub const JSONRPC_RESERVED_ERROR_CODES: RangeInclusive<i64> = -32768..=-32000;
 
 trait IntoRpcError {
@@ -81,12 +82,16 @@ impl RequestOrResponse {
         Ok(serde_json::from_slice(d)?)
     }
 
-    pub fn from_str(s: &str) -> Result<Self, Error> {
-        Ok(serde_json::from_str(s)?)
-    }
-
     pub fn from_value(v: Value) -> Result<Self, Error> {
         Ok(serde_json::from_value(v)?)
+    }
+}
+
+impl FromStr for RequestOrResponse {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(serde_json::from_str(s)?)
     }
 }
 
@@ -134,10 +139,8 @@ impl Request {
         P: Serialize,
         I: Serialize,
     {
-        let params = params_opt
-            .map(|params| serde_json::to_value(params))
-            .transpose()?;
-        let id = id_opt.map(|id| serde_json::to_value(id)).transpose()?;
+        let params = params_opt.map(serde_json::to_value).transpose()?;
+        let id = id_opt.map(serde_json::to_value).transpose()?;
 
         Ok(Self::new(method, params, id))
     }
@@ -179,7 +182,7 @@ impl Request {
     }
 
     pub fn to_value(&self) -> Result<Value, Error> {
-        Ok(serde_json::to_value(&self)?)
+        Ok(serde_json::to_value(self)?)
     }
 }
 
@@ -305,7 +308,7 @@ impl RpcError {
         Self {
             code,
             message: Some(message.to_owned()),
-            data: description.map(|s| Value::from(s)),
+            data: description.map(Value::from),
         }
     }
 
@@ -361,9 +364,9 @@ impl TryFrom<Value> for SubscriptionId {
             Value::String(s) => Ok(SubscriptionId::String(s)),
             Value::Number(n) => n
                 .as_u64()
-                .map(|n| SubscriptionId::Number(n))
+                .map(SubscriptionId::Number)
                 .ok_or_else(|| Error::InvalidSubscriptionId(Value::Number(n))),
-            value @ _ => Err(Error::InvalidSubscriptionId(value)),
+            value => Err(Error::InvalidSubscriptionId(value)),
         }
     }
 }

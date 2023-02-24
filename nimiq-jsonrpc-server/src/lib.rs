@@ -191,7 +191,7 @@ impl<D: Dispatcher> Server<D> {
         };
 
         warp::serve(root.and(json_rpc_route))
-            .run(self.inner.config.bind_to.clone())
+            .run(self.inner.config.bind_to)
             .await;
     }
 
@@ -291,14 +291,12 @@ impl<D: Dispatcher> Server<D> {
         match request {
             SingleOrBatch::Single(request) => Self::handle_single_request(inner, request, tx)
                 .await
-                .map(|response| SingleOrBatch::Single(response)),
+                .map(SingleOrBatch::Single),
 
             SingleOrBatch::Batch(requests) => {
                 let futures = requests
                     .into_iter()
-                    .map(|request| {
-                        Self::handle_single_request(Arc::clone(&inner), request, tx.clone())
-                    })
+                    .map(|request| Self::handle_single_request(Arc::clone(&inner), request, tx))
                     .collect::<FuturesUnordered<_>>();
 
                 let responses = futures
@@ -401,8 +399,7 @@ impl Dispatcher for ModularDispatcher {
     fn method_names(&self) -> Vec<&str> {
         self.dispatchers
             .iter()
-            .map(|dispatcher| dispatcher.method_names())
-            .flatten()
+            .flat_map(|dispatcher| dispatcher.method_names())
             .collect()
     }
 }

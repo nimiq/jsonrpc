@@ -4,7 +4,7 @@
 //!
 //! This is still experimental.
 
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
@@ -153,23 +153,21 @@ impl WebsocketClient {
             RequestOrResponse::Request(request) => {
                 if request.id.is_some() {
                     log::error!("Received unexpected request, which is not a notification.");
-                } else {
-                    if let Some(params) = request.params {
-                        let message: SubscriptionMessage<Value> = serde_json::from_value(params)
-                            .expect("Failed to deserialize request parameters");
+                } else if let Some(params) = request.params {
+                    let message: SubscriptionMessage<Value> = serde_json::from_value(params)
+                        .expect("Failed to deserialize request parameters");
 
-                        let mut streams = streams.write().await;
-                        if let Some(tx) = streams.get_mut(&message.subscription) {
-                            tx.send(message).await?;
-                        } else {
-                            log::error!(
-                                "Notification for unknown stream ID: {}",
-                                message.subscription
-                            );
-                        }
+                    let mut streams = streams.write().await;
+                    if let Some(tx) = streams.get_mut(&message.subscription) {
+                        tx.send(message).await?;
                     } else {
-                        log::error!("No 'params' field in notification.");
+                        log::error!(
+                            "Notification for unknown stream ID: {}",
+                            message.subscription
+                        );
                     }
+                } else {
+                    log::error!("No 'params' field in notification.");
                 }
             }
             RequestOrResponse::Response(response) => {

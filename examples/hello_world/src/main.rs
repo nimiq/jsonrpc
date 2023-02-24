@@ -63,13 +63,11 @@ async fn main() {
 
     pretty_env_logger::init();
 
-    let mut config = Config::default();
-
-    // This is the default:
-    config.bind_to = ([127, 0, 0, 1], 8000).into();
-
-    // JSON-RPC over websocket is enabled by default, but we don't need it in this example.
-    config.enable_websocket = false;
+    let config = Config {
+        bind_to: ([127, 0, 0, 1], 8000).into(),
+        enable_websocket: false, // JSON-RPC over websocket is enabled by default, but we don't need it in this example.
+        ..Default::default()
+    };
 
     log::info!("Listening on: {}", config.bind_to);
 

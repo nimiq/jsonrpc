@@ -64,10 +64,13 @@ async fn main() {
 
     let credentials: Credentials = ("user1", "password1").into();
 
-    let mut config = Config::default();
-    config.bind_to = ([127, 0, 0, 1], 8000).into();
-    config.basic_auth = Some(credentials.clone());
-    config.enable_websocket = false;
+    let config = Config {
+        bind_to: ([127, 0, 0, 1], 8000).into(),
+        basic_auth: Some(credentials.clone()),
+        enable_websocket: false,
+        ..Default::default()
+    };
+
     log::info!("Listening on: {}", config.bind_to);
 
     let server = Server::new(config, HelloWorldService);

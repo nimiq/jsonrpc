@@ -232,11 +232,11 @@ impl<'a> RpcMethod<'a> {
 
 #[derive(Clone, Debug, FromMeta)]
 pub(crate) enum RenameAll {
-    CamelCase,
-    KebabCase,
-    MixedCase,
-    ShoutySnakeCase,
-    SnakeCase,
+    Camel,
+    Kebab,
+    Mixed,
+    ShoutySnake,
+    Snake,
 }
 
 impl FromStr for RenameAll {
@@ -244,11 +244,11 @@ impl FromStr for RenameAll {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
-            "CamelCase" => Self::CamelCase,
-            "kebab-case" => Self::KebabCase,
-            "mixedCase" | "camelCase" => Self::MixedCase,
-            "SHOUTY_SNAKE_CASE" => Self::ShoutySnakeCase,
-            "snake_case" => Self::SnakeCase,
+            "CamelCase" => Self::Camel,
+            "kebab-case" => Self::Kebab,
+            "mixedCase" | "camelCase" => Self::Mixed,
+            "SHOUTY_SNAKE_CASE" => Self::ShoutySnake,
+            "snake_case" => Self::Snake,
             _ => panic!("Invalid case name: {}", s),
         })
     }
@@ -257,11 +257,11 @@ impl FromStr for RenameAll {
 impl RenameAll {
     pub fn rename(&self, name: &str) -> String {
         match self {
-            RenameAll::CamelCase => name.to_upper_camel_case(),
-            RenameAll::KebabCase => name.to_kebab_case(),
-            RenameAll::MixedCase => name.to_lower_camel_case(),
-            RenameAll::ShoutySnakeCase => name.to_shouty_snake_case(),
-            RenameAll::SnakeCase => name.to_snake_case(),
+            RenameAll::Camel => name.to_upper_camel_case(),
+            RenameAll::Kebab => name.to_kebab_case(),
+            RenameAll::Mixed => name.to_lower_camel_case(),
+            RenameAll::ShoutySnake => name.to_shouty_snake_case(),
+            RenameAll::Snake => name.to_snake_case(),
         }
     }
 }

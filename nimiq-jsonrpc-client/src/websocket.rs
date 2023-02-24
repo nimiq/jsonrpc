@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -85,7 +85,7 @@ impl WebsocketClient {
                 let header_value = format!(
                     "Basic {}",
                     base64::prelude::BASE64_STANDARD
-                        .encode(&format!("{}:{}", basic_auth.username, basic_auth.password))
+                        .encode(format!("{}:{}", basic_auth.username, basic_auth.password))
                 );
                 request_builder = request_builder.header("Authorization", header_value);
             }
@@ -139,7 +139,7 @@ impl WebsocketClient {
     ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
     ///
     pub async fn with_url(url: Url) -> Result<Self, Error> {
-        Ok(Self::new(url, None).await?)
+        Self::new(url, None).await
     }
 
     async fn handle_websocket_message(
@@ -158,23 +158,21 @@ impl WebsocketClient {
             RequestOrResponse::Request(request) => {
                 if request.id.is_some() {
                     log::error!("Received unexpected request, which is not a notification.");
-                } else {
-                    if let Some(params) = request.params {
-                        let message: SubscriptionMessage<Value> = serde_json::from_value(params)
-                            .expect("Failed to deserialize request parameters");
+                } else if let Some(params) = request.params {
+                    let message: SubscriptionMessage<Value> = serde_json::from_value(params)
+                        .expect("Failed to deserialize request parameters");
 
-                        let mut streams = streams.write().await;
-                        if let Some(tx) = streams.get_mut(&message.subscription) {
-                            tx.send(message).await?;
-                        } else {
-                            log::error!(
-                                "Notification for unknown stream ID: {}",
-                                message.subscription
-                            );
-                        }
+                    let mut streams = streams.write().await;
+                    if let Some(tx) = streams.get_mut(&message.subscription) {
+                        tx.send(message).await?;
                     } else {
-                        log::error!("No 'params' field in notification.");
+                        log::error!(
+                            "Notification for unknown stream ID: {}",
+                            message.subscription
+                        );
                     }
+                } else {
+                    log::error!("No 'params' field in notification.");
                 }
             }
             RequestOrResponse::Response(response) => {
@@ -238,12 +236,8 @@ impl Client for WebsocketClient {
         self.streams.write().await.insert(id, tx);
 
         let stream = async_stream::stream! {
-            loop {
-                if let Some(message) = rx.recv().await {
-                    yield serde_json::from_value(message.result).unwrap();
-                } else {
-                    break;
-                }
+            while let Some(message) = rx.recv().await {
+                yield serde_json::from_value(message.result).unwrap();
             }
         };
 
