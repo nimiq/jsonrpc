@@ -43,7 +43,7 @@ impl HelloWorld for HelloWorldService {
 
 #[tokio::main]
 async fn main() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     if env::var("RUST_LOG").is_err() {
         env::set_var(
             "RUST_LOG",

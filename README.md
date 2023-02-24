@@ -36,7 +36,7 @@ impl Foobar for FoobarService {
 
 #[tokio::main]
 async fn main() {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
     pretty_env_logger::init();
 
     let config = Config::default();

@@ -51,7 +51,7 @@ impl HelloWorld for HelloWorldService {
 #[tokio::main]
 async fn main() {
     // Load environment variables from `.env` file. You can set the RUST_LOG there, if you like.
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
 
     // Default to displaying our debug messages, and only info messages otherwise.
     if env::var("RUST_LOG").is_err() {
