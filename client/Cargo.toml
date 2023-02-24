@@ -24,7 +24,7 @@ url = "2.3"
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 
-nimiq-jsonrpc-core = { path = "../nimiq-jsonrpc-core" }
+nimiq-jsonrpc-core = { path = "../core" }
 
 [dependencies.web-sys]
 version = "0.3"
@@ -40,7 +40,7 @@ features = [
 ]
 
 [dev-dependencies]
-nimiq-jsonrpc-derive = { path = "../nimiq-jsonrpc-derive" }
+nimiq-jsonrpc-derive = { path = "../derive" }
 
 [features]
 default = ["http-client", "websocket-client"]

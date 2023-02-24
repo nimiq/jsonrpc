@@ -1,11 +1,11 @@
 [workspace]
 members = [
-	"nimiq-jsonrpc-server",
-	"nimiq-jsonrpc-derive",
-	"nimiq-jsonrpc-client",
-	"nimiq-jsonrpc-core",
+	"client",
+	"core",
+	"derive",
+	"server",
 
+	"examples/basic_auth",
 	"examples/hello_world",
 	"examples/pubsub",
-	"examples/basic_auth",
 ]
