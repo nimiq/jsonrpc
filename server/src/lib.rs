@@ -2,7 +2,9 @@
 //! at `/` and requests over websocket at `/ws`.
 
 #![warn(missing_docs)]
-#![warn(missing_doc_code_examples)]
+#![warn(rustdoc::missing_doc_code_examples)]
+
+mod auth_filter;
 
 use std::{
     collections::HashSet,
@@ -23,14 +25,12 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     Stream,
 };
+use headers::{authorization::Basic, Authorization};
 use serde::{de::Deserialize, ser::Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::{mpsc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use warp::{
-    auth::{Authorization, Basic},
-    Filter,
-};
+use warp::Filter;
 
 use nimiq_jsonrpc_core::{
     Credentials, Request, Response, RpcError, SingleOrBatch, SubscriptionId, SubscriptionMessage,
@@ -168,8 +168,8 @@ impl<D: Dispatcher> Server<D> {
 
         let root = if self.inner.config.basic_auth.is_some() {
             let inner = Arc::clone(&self.inner);
-
-            warp::auth::basic("JSON-RPC")
+            let realm = "JSON-RPC";
+            auth_filter::basic_auth_filter(realm)
                 .and_then(move |auth_header: Authorization<Basic>| {
                     let inner = Arc::clone(&inner);
 
@@ -180,7 +180,9 @@ impl<D: Dispatcher> Server<D> {
                         {
                             Ok(())
                         } else {
-                            Err(warp::reject::unauthorized())
+                            Err(warp::reject::custom(auth_filter::Unauthorized {
+                                realm: realm.to_string(),
+                            }))
                         }
                     }
                 })
@@ -190,9 +192,12 @@ impl<D: Dispatcher> Server<D> {
             warp::any().boxed()
         };
 
-        warp::serve(root.and(json_rpc_route))
-            .run(self.inner.config.bind_to)
-            .await;
+        warp::serve(
+            root.and(json_rpc_route)
+                .recover(auth_filter::handle_auth_rejection),
+        )
+        .run(self.inner.config.bind_to)
+        .await;
     }
 
     /// Upgrades a connection to websocket. This creates message queues and tasks to forward messages between them.
