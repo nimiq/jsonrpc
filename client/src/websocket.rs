@@ -6,7 +6,6 @@ use futures::{
     sink::SinkExt,
     stream::{BoxStream, SplitSink, StreamExt},
 };
-use http::Request as HttpRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -14,7 +13,7 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot, RwLock},
 };
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
@@ -79,7 +78,7 @@ impl WebsocketClient {
     pub async fn new(url: Url, basic_auth: Option<Credentials>) -> Result<Self, Error> {
         let request = {
             let uri: http::Uri = url.to_string().parse().unwrap();
-            let mut request_builder = HttpRequest::get(uri);
+            let mut request = uri.into_client_request()?;
 
             if let Some(basic_auth) = basic_auth {
                 let header_value = format!(
@@ -87,10 +86,15 @@ impl WebsocketClient {
                     base64::prelude::BASE64_STANDARD
                         .encode(format!("{}:{}", basic_auth.username, basic_auth.password))
                 );
-                request_builder = request_builder.header("Authorization", header_value);
+                request.headers_mut().append(
+                    "Authorization",
+                    header_value
+                        .parse()
+                        .map_err(|e| Error::HTTP(http::Error::from(e)))?,
+                );
             }
 
-            request_builder.body(())?
+            request
         };
 
         log::debug!("HTTP request: {:?}", request);
