@@ -68,7 +68,7 @@ pub struct WebsocketClient {
 impl WebsocketClient {
     /// Creates a new websocket client, connecting to the specified url.
     pub async fn new(url: Url) -> Result<Self, Error> {
-        let ws = WebSocket::new(&url.to_string())?;
+        let ws = WebSocket::new(url.as_ref())?;
         ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
 
         let streams = Arc::new(RwLock::new(HashMap::new()));
