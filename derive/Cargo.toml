@@ -8,11 +8,11 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-darling = "0.14"
+darling = "0.20"
 heck = "0.4"
 proc-macro2 = "1.0"
 quote = "1.0"
-syn = { version = "1.0", features = ["full"] }
+syn = { version = "2.0", features = ["full"] }
 
 nimiq-jsonrpc-client = { path = "../client" }
 nimiq-jsonrpc-core = { path = "../core" }

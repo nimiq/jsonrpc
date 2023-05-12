@@ -1,7 +1,7 @@
-use darling::FromMeta;
+use darling::{ast::NestedMeta, Error, FromMeta};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, AttributeArgs, ItemTrait, TraitItem};
+use syn::{parse_macro_input, ItemTrait, TraitItem};
 
 use crate::{RenameAll, RpcMethod};
 
@@ -17,7 +17,12 @@ pub fn proxy_macro(
     args: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let attr_args = parse_macro_input!(args as AttributeArgs);
+    let attr_args = match NestedMeta::parse_meta_list(args.into()) {
+        Ok(v) => v,
+        Err(e) => {
+            return proc_macro::TokenStream::from(Error::from(e).write_errors());
+        }
+    };
     let mut tr = parse_macro_input!(input as ItemTrait);
 
     let args = match ProxyMeta::from_list(&attr_args) {
@@ -59,7 +64,7 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
     let rename_all: Option<RenameAll> = args.rename_all.as_ref().map(|r| r.parse().unwrap());
 
     for item in &mut tr.items {
-        if let TraitItem::Method(method) = item {
+        if let TraitItem::Fn(method) = item {
             let method = RpcMethod::new(
                 &method.sig,
                 &args_struct_prefix,

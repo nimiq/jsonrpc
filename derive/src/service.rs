@@ -1,7 +1,7 @@
-use darling::FromMeta;
+use darling::{ast::NestedMeta, Error, FromMeta};
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, AttributeArgs, ImplItem, ItemImpl, Type};
+use syn::{parse_macro_input, ImplItem, ItemImpl, Type};
 
 use crate::{RenameAll, RpcMethod};
 
@@ -16,7 +16,12 @@ pub fn service_macro(
     args: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let attr_args = parse_macro_input!(args as AttributeArgs);
+    let attr_args = match NestedMeta::parse_meta_list(args.into()) {
+        Ok(v) => v,
+        Err(e) => {
+            return proc_macro::TokenStream::from(Error::from(e).write_errors());
+        }
+    };
     let mut im = parse_macro_input!(input as ItemImpl);
 
     let args = match ServiceMeta::from_list(&attr_args) {
@@ -56,7 +61,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
     let rename_all: Option<RenameAll> = args.rename_all.as_ref().map(|r| r.parse().unwrap());
 
     for item in &mut im.items {
-        if let ImplItem::Method(method) = item {
+        if let ImplItem::Fn(method) = item {
             let method = RpcMethod::new(
                 &method.sig,
                 &args_struct_prefix,

@@ -37,7 +37,7 @@ impl MethodAttributes {
         let mut attrs = MethodAttributes::default();
 
         input.retain(|attr: &Attribute| {
-            if attr.path.is_ident("stream") {
+            if attr.path().is_ident("stream") {
                 attrs.stream = Some(attr.clone());
                 false
             } else {
