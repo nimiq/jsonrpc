@@ -247,4 +247,6 @@ impl Client for WebsocketClient {
 
         Ok(())
     }
+
+    async fn close(&mut self) {}
 }

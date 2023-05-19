@@ -56,10 +56,6 @@ type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
 
 /// A websocket JSON-RPC client.
 ///
-/// # TODO
-///
-///  - Gracefully close the websocket, when the client is dropped.
-///
 pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
@@ -257,5 +253,12 @@ impl Client for WebsocketClient {
         }
 
         Ok(())
+    }
+
+    /// Close the websocket connection
+    async fn close(&mut self) {
+        // Try to send the close message
+        // We don't do anything if it fails
+        let _ = self.sender.send(Message::Close(None)).await;
     }
 }

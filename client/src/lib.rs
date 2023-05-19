@@ -123,6 +123,9 @@ pub trait Client {
     /// If the client doesn't support receiving notifications, this method is allowed to panic.
     ///
     async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error>;
+
+    /// Closes the client connection
+    async fn close(&mut self);
 }
 
 /// Wraps a client into an `Arc<Mutex<_>>`, so that it can be cloned.
@@ -154,6 +157,10 @@ impl<C: Client + Send> Client for ArcClient<C> {
 
     async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error> {
         self.inner.lock().await.disconnect_stream(id).await
+    }
+
+    async fn close(&mut self) {
+        self.inner.lock().await.close().await
     }
 }
 
