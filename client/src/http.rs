@@ -121,4 +121,6 @@ impl Client for HttpClient {
     async fn disconnect_stream(&mut self, _id: SubscriptionId) -> Result<(), Self::Error> {
         panic!("Streams are not supported by the HTTP client.");
     }
+
+    async fn close(&mut self) {}
 }

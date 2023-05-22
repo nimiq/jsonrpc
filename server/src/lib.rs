@@ -54,6 +54,10 @@ pub enum Error {
     /// JSON RPC error (from [`nimiq_jsonrpc_core`])
     #[error("JSON RPC error: {0}")]
     JsonRpc(#[from] nimiq_jsonrpc_core::Error),
+
+    /// Unsupported message type
+    #[error("Unsupported message")]
+    UnsupportedMessageType,
 }
 
 /// The server configuration
@@ -228,14 +232,22 @@ impl<D: Dispatcher> Server<D> {
             let handle_fut = {
                 async move {
                     while let Some(message) = rx.next().await.transpose()? {
-                        if let Some(response) = Self::handle_raw_request(
-                            Arc::clone(&inner),
-                            message.as_bytes(),
-                            Some(&multiplex_tx),
-                        )
-                        .await
-                        {
-                            multiplex_tx.send(response).await?;
+                        if message.is_close() {
+                            // We received the close message, so we need to exit the loop
+                            break;
+                        } else if message.is_binary() {
+                            if let Some(response) = Self::handle_raw_request(
+                                Arc::clone(&inner),
+                                message.as_bytes(),
+                                Some(&multiplex_tx),
+                            )
+                            .await
+                            {
+                                multiplex_tx.send(response).await?;
+                            }
+                        } else {
+                            log::error!("Message type is not supported {:?}", message);
+                            return Err(Error::UnsupportedMessageType);
                         }
                     }
                     Ok::<(), Error>(())
