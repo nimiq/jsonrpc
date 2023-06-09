@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, str::FromStr, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, fmt::Debug, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -13,7 +13,11 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot, RwLock},
 };
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+use tokio_tungstenite::tungstenite::{
+    client::IntoClientRequest,
+    protocol::{frame::coding::CloseCode, CloseFrame},
+    Message,
+};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
@@ -259,6 +263,12 @@ impl Client for WebsocketClient {
     async fn close(&mut self) {
         // Try to send the close message
         // We don't do anything if it fails
-        let _ = self.sender.send(Message::Close(None)).await;
+        let _ = self
+            .sender
+            .send(Message::Close(Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: Cow::from(""),
+            })))
+            .await;
     }
 }
