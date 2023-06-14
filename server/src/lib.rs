@@ -54,10 +54,6 @@ pub enum Error {
     /// JSON RPC error (from [`nimiq_jsonrpc_core`])
     #[error("JSON RPC error: {0}")]
     JsonRpc(#[from] nimiq_jsonrpc_core::Error),
-
-    /// Unsupported message type
-    #[error("Unsupported message")]
-    UnsupportedMessageType,
 }
 
 /// The server configuration
@@ -232,22 +228,34 @@ impl<D: Dispatcher> Server<D> {
             let handle_fut = {
                 async move {
                     while let Some(message) = rx.next().await.transpose()? {
-                        if message.is_close() {
-                            // We received the close message, so we need to exit the loop
-                            break;
-                        } else if message.is_binary() {
-                            if let Some(response) = Self::handle_raw_request(
-                                Arc::clone(&inner),
-                                message.as_bytes(),
-                                Some(&multiplex_tx),
-                            )
-                            .await
-                            {
-                                multiplex_tx.send(response).await?;
+                        if message.is_ping() || message.is_pong() {
+                            // Do nothing - these messages are handled automatically
+                        } else if message.is_close() {
+                            // We received the close message, so we need to send a close message and exit the loop
+                            if let Some((code, reason)) = message.close_frame() {
+                                // If the close message contains a code and a reason, we need to echo it back
+                                multiplex_tx
+                                    .send(
+                                        warp::ws::Message::close_with(code, reason.to_owned())
+                                            .into_bytes(),
+                                    )
+                                    .await?;
+                            } else {
+                                // Otherwise we echo an empty close message
+                                multiplex_tx
+                                    .send(warp::ws::Message::close().into_bytes())
+                                    .await?;
                             }
-                        } else {
-                            log::error!("Message type is not supported {:?}", message);
-                            return Err(Error::UnsupportedMessageType);
+                            // Then we exit the loop which closes the connection
+                            break;
+                        } else if let Some(response) = Self::handle_raw_request(
+                            Arc::clone(&inner),
+                            message.as_bytes(),
+                            Some(&multiplex_tx),
+                        )
+                        .await
+                        {
+                            multiplex_tx.send(response).await?;
                         }
                     }
                     Ok::<(), Error>(())
