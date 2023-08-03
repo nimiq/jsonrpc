@@ -25,3 +25,9 @@ categories = [
 	"web-programming::websocket"
 ]
 keywords = ["json", "jsonrpc", "json-rpc", "nimiq", "rpc"]
+
+[workspace.dependencies]
+nimiq-jsonrpc-client = { path = "client" }
+nimiq-jsonrpc-core = { path = "core" }
+nimiq-jsonrpc-derive = { path = "derive" }
+nimiq-jsonrpc-server = { path = "server" }
