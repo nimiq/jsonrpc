@@ -1,3 +1,4 @@
+[![Build + Test](https://github.com/nimiq/jsonrpc/actions/workflows/build+test.yml/badge.svg)](https://github.com/nimiq/jsonrpc/actions/workflows/build+test.yml)
 # Nimiq JSON-RPC
 
 A Rust implementation of the [JSON-RPC 2.0 specification](https://www.jsonrpc.org/specification#notification).
