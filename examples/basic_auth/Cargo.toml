@@ -1,8 +1,14 @@
 [package]
 name = "basic-auth"
-version = "0.1.0"
-authors = ["Janosch Gräf <janosch@nimiq.com>"]
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Example for JSON-RPC basic authentication"
+homepage.workspace = true
+repository.workspace = true
+categories.workspace = true
+keywords.workspace = true
 publish = false
 
 [dependencies]

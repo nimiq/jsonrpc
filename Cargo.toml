@@ -9,3 +9,19 @@ members = [
 	"examples/hello_world",
 	"examples/pubsub",
 ]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Janosch Gräf <janosch@nimiq.com>", "The Nimiq Core Development Team <info@nimiq.com>"]
+edition = "2021"
+homepage = "https://nimiq.com"
+repository = "https://github.com/nimiq/jsonrpc"
+license = "Apache-2.0"
+categories = [
+	"asynchronous",
+	"network-programming",
+	"web-programming::http-client",
+	"web-programming::http-server",
+	"web-programming::websocket"
+]
+keywords = ["json", "jsonrpc", "json-rpc", "nimiq", "rpc"]
