@@ -215,12 +215,17 @@ impl<D: Dispatcher> Server<D> {
         ws.on_upgrade(move |websocket| {
             let (mut tx, mut rx) = websocket.split();
 
-            let (multiplex_tx, mut multiplex_rx) = mpsc::channel(16); // TODO: What size?
+            let (multiplex_tx, mut multiplex_rx) = mpsc::channel::<Message>(16); // TODO: What size?
 
             // Forwards multiplexer queue output to websocket
             let forward_fut = async move {
                 while let Some(data) = multiplex_rx.recv().await {
-                    tx.send(data).await?;
+                    // Close the sink if we get a close message (don't echo the message since this is not permitted)
+                    if data.is_close() {
+                        tx.close().await?;
+                    } else {
+                        tx.send(data).await?;
+                    }
                 }
                 Ok::<(), Error>(())
             };
@@ -232,16 +237,8 @@ impl<D: Dispatcher> Server<D> {
                         if message.is_ping() || message.is_pong() {
                             // Do nothing - these messages are handled automatically
                         } else if message.is_close() {
-                            // We received the close message, so we need to send a close message and exit the loop
-                            if let Some((code, reason)) = message.close_frame() {
-                                // If the close message contains a code and a reason, we need to echo it back
-                                multiplex_tx
-                                    .send(warp::ws::Message::close_with(code, reason.to_owned()))
-                                    .await?;
-                            } else {
-                                // Otherwise we echo an empty close message
-                                multiplex_tx.send(warp::ws::Message::close()).await?;
-                            }
+                            // We received the close message, so we need to send a close message to close the sink
+                            multiplex_tx.send(warp::ws::Message::close()).await?;
                             // Then we exit the loop which closes the connection
                             break;
                         } else if let Some(response) = Self::handle_raw_request(
