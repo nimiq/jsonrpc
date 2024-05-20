@@ -7,9 +7,9 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
-use nimiq_jsonrpc_core::{Credentials, Request, Response, SubscriptionId};
+use nimiq_jsonrpc_core::{Request, Response, SubscriptionId};
 
-use crate::Client;
+use crate::{Client, Credentials};
 
 /// Error that might be returned by the http client.
 #[derive(Debug, Error)]

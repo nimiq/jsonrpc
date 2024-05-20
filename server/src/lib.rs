@@ -34,7 +34,7 @@ pub use warp::filters::ws::Message;
 use warp::Filter;
 
 use nimiq_jsonrpc_core::{
-    Credentials, Request, Response, RpcError, SingleOrBatch, SubscriptionId, SubscriptionMessage,
+    Request, Response, RpcError, Sensitive, SingleOrBatch, SubscriptionId, SubscriptionMessage,
 };
 
 /// A server error.
@@ -86,6 +86,25 @@ impl Default for Config {
             enable_websocket: true,
             ip_whitelist: None,
             basic_auth: None,
+        }
+    }
+}
+
+/// Basic auth credentials, containing username and password.
+#[derive(Clone, Debug)]
+pub struct Credentials {
+    /// Username.
+    pub username: String,
+    /// Password.
+    pub password: Sensitive<String>,
+}
+
+impl Credentials {
+    /// Create basic auth credentials from username and password.
+    pub fn new<T: Into<String>, U: Into<String>>(username: T, password: U) -> Credentials {
+        Credentials {
+            username: username.into(),
+            password: Sensitive(password.into()),
         }
     }
 }

@@ -53,7 +53,7 @@ use async_trait::async_trait;
 use futures::{lock::Mutex, stream::BoxStream};
 use serde::{de::Deserialize, ser::Serialize};
 
-use nimiq_jsonrpc_core::SubscriptionId;
+use nimiq_jsonrpc_core::{Sensitive, SubscriptionId};
 
 #[async_trait]
 /// This trait must be implemented by the client's transport. It is responsible to send the request and return the
@@ -177,6 +177,25 @@ impl<C> Clone for ArcClient<C> {
     fn clone(&self) -> Self {
         ArcClient {
             inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+/// Basic auth credentials, containing username and password.
+#[derive(Clone, Debug)]
+pub struct Credentials {
+    /// Username.
+    pub username: String,
+    /// Password.
+    pub password: Sensitive<String>,
+}
+
+impl Credentials {
+    /// Create basic auth credentials from username and password.
+    pub fn new<T: Into<String>, U: Into<String>>(username: T, password: U) -> Credentials {
+        Credentials {
+            username: username.into(),
+            password: Sensitive(password.into()),
         }
     }
 }

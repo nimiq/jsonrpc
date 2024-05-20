@@ -22,10 +22,10 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use url::Url;
 
 use nimiq_jsonrpc_core::{
-    Credentials, Request, RequestOrResponse, Response, SubscriptionId, SubscriptionMessage,
+    Request, RequestOrResponse, Response, SubscriptionId, SubscriptionMessage,
 };
 
-use crate::Client;
+use crate::{Client, Credentials};
 
 /// Error type returned by websocket client.
 #[derive(Debug, Error)]

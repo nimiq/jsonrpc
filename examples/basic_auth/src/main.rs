@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use nimiq_jsonrpc_client::http::HttpClient;
 use nimiq_jsonrpc_client::websocket::WebsocketClient;
-use nimiq_jsonrpc_core::Credentials;
-use nimiq_jsonrpc_server::{Config, Server};
+use nimiq_jsonrpc_client::Credentials as ClientCredentials;
+use nimiq_jsonrpc_server::{Config, Credentials as ServerCredentials, Server};
 
 /// You can pass custom types over JSON-RPC, if they implement Serialize and Deserialize.
 #[derive(Debug, Serialize, Deserialize)]
@@ -62,11 +62,14 @@ async fn main() {
 
     pretty_env_logger::init();
 
-    let credentials: Credentials = ("user1", "password1").into();
+    let credentials = ClientCredentials::new("user1", "password1");
 
     let config = Config {
         bind_to: ([127, 0, 0, 1], 8000).into(),
-        basic_auth: Some(credentials.clone()),
+        basic_auth: Some(ServerCredentials::new(
+            &credentials.username,
+            &credentials.password.0,
+        )),
         enable_websocket: false,
         ..Default::default()
     };
