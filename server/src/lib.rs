@@ -9,7 +9,7 @@ mod auth_filter;
 use std::{
     collections::HashSet,
     fmt::Debug,
-    future::Future,
+    future::{self, Future},
     net::{IpAddr, SocketAddr},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -18,6 +18,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use blake2::{digest::consts::U32, Blake2b, Digest};
 use bytes::Bytes;
 use futures::{
     pin_mut,
@@ -28,6 +29,7 @@ use futures::{
 use headers::{authorization::Basic, Authorization};
 use serde::{de::Deserialize, ser::Serialize};
 use serde_json::Value;
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tokio::sync::{mpsc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 pub use warp::filters::ws::Message;
@@ -90,21 +92,43 @@ impl Default for Config {
     }
 }
 
+fn blake2b(bytes: &[u8]) -> [u8; 32] {
+    *Blake2b::<U32>::digest(bytes).as_ref()
+}
+
 /// Basic auth credentials, containing username and password.
 #[derive(Clone, Debug)]
 pub struct Credentials {
-    /// Username.
-    pub username: String,
-    /// Password.
-    pub password: Sensitive<String>,
+    username: String,
+    password_blake2b: Sensitive<[u8; 32]>,
 }
 
 impl Credentials {
     /// Create basic auth credentials from username and password.
-    pub fn new<T: Into<String>, U: Into<String>>(username: T, password: U) -> Credentials {
+    pub fn new<T: Into<String>, U: AsRef<str>>(username: T, password: U) -> Credentials {
+        Credentials::new_from_blake2b(username, blake2b(password.as_ref().as_bytes()))
+    }
+    /// Create basic auth credentials from username and Blake2b hash of the password.
+    pub fn new_from_blake2b<T: Into<String>>(
+        username: T,
+        password_blake2b: [u8; 32],
+    ) -> Credentials {
         Credentials {
             username: username.into(),
-            password: Sensitive(password.into()),
+            password_blake2b: Sensitive(password_blake2b),
+        }
+    }
+    /// Verifies basic auth credentials against username and password in constant time.
+    pub fn verify<T: AsRef<str>, U: AsRef<str>>(&self, username: T, password: U) -> Result<(), ()> {
+        if (self.username.as_bytes().ct_eq(username.as_ref().as_bytes())
+            & self
+                .password_blake2b
+                .ct_eq(&blake2b(password.as_ref().as_bytes())))
+        .into()
+        {
+            Ok(())
+        } else {
+            Err(())
         }
     }
 }
@@ -193,18 +217,16 @@ impl<D: Dispatcher> Server<D> {
                 .and_then(move |auth_header: Authorization<Basic>| {
                     let inner = Arc::clone(&inner);
 
-                    async move {
-                        let basic_auth = inner.config.basic_auth.as_ref().unwrap();
-                        if auth_header.0.username() == basic_auth.username
-                            && auth_header.0.password() == basic_auth.password.0
-                        {
-                            Ok(())
-                        } else {
-                            Err(warp::reject::custom(auth_filter::Unauthorized {
-                                realm: realm.to_string(),
-                            }))
-                        }
-                    }
+                    let basic_auth = inner.config.basic_auth.as_ref().unwrap();
+                    future::ready(
+                        basic_auth
+                            .verify(auth_header.0.username(), auth_header.0.password())
+                            .map_err(|()| {
+                                warp::reject::custom(auth_filter::Unauthorized {
+                                    realm: realm.to_string(),
+                                })
+                            }),
+                    )
                 })
                 .untuple_one()
                 .boxed()
