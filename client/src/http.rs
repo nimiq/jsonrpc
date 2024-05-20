@@ -91,7 +91,7 @@ impl Client for HttpClient {
 
         if let Some(basic_auth) = &self.basic_auth {
             request_builder =
-                request_builder.basic_auth(&basic_auth.username, Some(&basic_auth.password));
+                request_builder.basic_auth(&basic_auth.username, Some(&basic_auth.password.0));
         }
 
         let response: Response = request_builder

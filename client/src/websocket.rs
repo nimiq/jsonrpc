@@ -84,7 +84,7 @@ impl WebsocketClient {
                 let header_value = format!(
                     "Basic {}",
                     base64::prelude::BASE64_STANDARD
-                        .encode(format!("{}:{}", basic_auth.username, basic_auth.password))
+                        .encode(format!("{}:{}", basic_auth.username, basic_auth.password.0))
                 );
                 request.headers_mut().append(
                     "Authorization",

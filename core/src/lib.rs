@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+mod sensitive;
+
+pub use self::sensitive::Sensitive;
+
 pub const JSONRPC_VERSION: &str = "2.0";
 pub const JSONRPC_RESERVED_ERROR_CODES: RangeInclusive<i64> = -32768..=-32000;
 
@@ -379,14 +383,14 @@ pub struct SubscriptionMessage<T> {
 #[derive(Clone, Debug)]
 pub struct Credentials {
     pub username: String,
-    pub password: String,
+    pub password: Sensitive<String>,
 }
 
 impl From<(&str, &str)> for Credentials {
     fn from((username, password): (&str, &str)) -> Self {
         Credentials {
             username: username.to_owned(),
-            password: password.to_owned(),
+            password: Sensitive(password.to_owned()),
         }
     }
 }

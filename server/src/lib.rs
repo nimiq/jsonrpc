@@ -177,7 +177,7 @@ impl<D: Dispatcher> Server<D> {
                     async move {
                         let basic_auth = inner.config.basic_auth.as_ref().unwrap();
                         if auth_header.0.username() == basic_auth.username
-                            && auth_header.0.password() == basic_auth.password
+                            && auth_header.0.password() == basic_auth.password.0
                         {
                             Ok(())
                         } else {
