@@ -12,20 +12,6 @@ use thiserror::Error;
 pub const JSONRPC_VERSION: &str = "2.0";
 pub const JSONRPC_RESERVED_ERROR_CODES: RangeInclusive<i64> = -32768..=-32000;
 
-trait IntoRpcError {
-    fn into_rpc_error(self) -> Option<RpcError>;
-}
-
-impl IntoRpcError for serde_json::Error {
-    fn into_rpc_error(self) -> Option<RpcError> {
-        Some(RpcError::internal_error(Some(serde_json::json!({
-            "line": self.line(),
-            "column": self.column(),
-            "classify": format!("{:?}", self.classify()),
-        }))))
-    }
-}
-
 /// An error of this JSON-RPC implementation. This can be either an error object returned by the server, or
 /// any other error that might be triggered in the server or client (e.g. a network error).
 #[derive(Debug, Error)]
@@ -43,18 +29,6 @@ pub enum Error {
 
     #[error("Invalid subscription ID: {0:?}")]
     InvalidSubscriptionId(Value),
-}
-
-impl IntoRpcError for Error {
-    /// Tries to convert this error to an error after the JSON-RPC specification.
-    fn into_rpc_error(self) -> Option<RpcError> {
-        match self {
-            Error::JsonRpc(e) => Some(e),
-            Error::Json(e) => e.into_rpc_error(),
-            Error::InvalidResponse => None,
-            Error::InvalidSubscriptionId(id) => Some(RpcError::internal_error(Some(id))),
-        }
-    }
 }
 
 /// A JSON-RPC request or response can either be a single request or response, or a list of the former. This `enum`
