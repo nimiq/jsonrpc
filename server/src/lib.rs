@@ -8,7 +8,8 @@ mod auth_filter;
 
 use std::{
     collections::HashSet,
-    fmt::Debug,
+    error,
+    fmt::{self, Debug},
     future::{self, Future},
     net::{IpAddr, SocketAddr},
     sync::{
@@ -103,6 +104,17 @@ pub struct Credentials {
     password_blake2b: Sensitive<[u8; 32]>,
 }
 
+/// Invalid username or password was passed to [`Credentials::verify`].
+#[derive(Clone, Debug)]
+pub struct CredentialsVerificationError(());
+
+impl error::Error for CredentialsVerificationError {}
+impl fmt::Display for CredentialsVerificationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt("invalid username or password", f)
+    }
+}
+
 impl Credentials {
     /// Create basic auth credentials from username and password.
     pub fn new<T: Into<String>, U: AsRef<str>>(username: T, password: U) -> Credentials {
@@ -119,7 +131,11 @@ impl Credentials {
         }
     }
     /// Verifies basic auth credentials against username and password in constant time.
-    pub fn verify<T: AsRef<str>, U: AsRef<str>>(&self, username: T, password: U) -> Result<(), ()> {
+    pub fn verify<T: AsRef<str>, U: AsRef<str>>(
+        &self,
+        username: T,
+        password: U,
+    ) -> Result<(), CredentialsVerificationError> {
         if (self.username.as_bytes().ct_eq(username.as_ref().as_bytes())
             & self
                 .password_blake2b
@@ -128,7 +144,7 @@ impl Credentials {
         {
             Ok(())
         } else {
-            Err(())
+            Err(CredentialsVerificationError(()))
         }
     }
 }
@@ -221,7 +237,7 @@ impl<D: Dispatcher> Server<D> {
                     future::ready(
                         basic_auth
                             .verify(auth_header.0.username(), auth_header.0.password())
-                            .map_err(|()| {
+                            .map_err(|CredentialsVerificationError(())| {
                                 warp::reject::custom(auth_filter::Unauthorized {
                                     realm: realm.to_string(),
                                 })
