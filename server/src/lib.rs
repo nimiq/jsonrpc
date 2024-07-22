@@ -206,6 +206,7 @@ impl<D: Dispatcher> Server<D> {
         let inner = Arc::clone(&self.inner);
         let post_route = warp::path::end()
             .and(warp::post())
+            .and(warp::body::content_length_limit(1024 * 1024))
             .and(warp::body::bytes())
             .and_then(move |body: Bytes| {
                 let inner = Arc::clone(&inner);
