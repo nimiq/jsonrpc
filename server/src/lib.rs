@@ -217,7 +217,7 @@ impl<D: Dispatcher> Server<D> {
 
                     let response = http::response::Builder::new()
                         .status(200)
-                        .header("Content-Type", "application/json-rpc")
+                        .header("Content-Type", "application/json")
                         .body(data.as_bytes().to_owned())
                         .unwrap(); // As long as the hard-coded status code and content-type is correct, this won't fail.
 
