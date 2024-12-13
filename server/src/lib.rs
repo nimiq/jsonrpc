@@ -596,11 +596,7 @@ where
         Ok(params) => params,
         Err(e) => {
             log::error!("{}", e);
-            return error_response(request.id, || {
-                RpcError::invalid_params(Some(
-                    "Expected an object for the request parameters.".to_owned(),
-                ))
-            });
+            return error_response(request.id, || RpcError::invalid_params(Some(e.to_string())));
         }
     };
 
