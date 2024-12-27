@@ -110,7 +110,7 @@ impl WebsocketClient {
 
         // Register onopen so we can wait for the websocket to be open
         let (ready_tx, ready_rx) = oneshot::channel::<()>();
-        let ready_tx = Arc::new(RefCell::new(Some(ready_tx)));
+        let ready_tx = RefCell::new(Some(ready_tx));
         let onopen_callback = Closure::wrap(Box::new(move |_| {
             if let Some(ready_tx) = ready_tx.replace(None) {
                 ready_tx.send(()).unwrap();

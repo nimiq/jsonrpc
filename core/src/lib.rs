@@ -346,7 +346,7 @@ impl TryFrom<Value> for SubscriptionId {
             Value::Number(n) => n
                 .as_u64()
                 .map(SubscriptionId::Number)
-                .ok_or_else(|| Error::InvalidSubscriptionId(Value::Number(n))),
+                .ok_or(Error::InvalidSubscriptionId(Value::Number(n))),
             value => Err(Error::InvalidSubscriptionId(value)),
         }
     }
