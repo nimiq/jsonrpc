@@ -62,7 +62,7 @@ pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
     next_id: u64,
-    sender: mpsc::Sender<Vec<u8>>,
+    sender: mpsc::Sender<String>,
 }
 
 impl WebsocketClient {
@@ -121,10 +121,10 @@ impl WebsocketClient {
         onopen_callback.forget();
 
         // Spawn future to do the sending for us
-        let (msg_tx, mut msg_rx) = mpsc::channel::<Vec<u8>>(1);
+        let (msg_tx, mut msg_rx) = mpsc::channel::<String>(1);
         wasm_bindgen_futures::spawn_local(async move {
             while let Some(message) = msg_rx.recv().await {
-                ws.send_with_u8_array(&message).unwrap();
+                ws.send_with_str(&message).unwrap();
             }
         });
 
@@ -202,7 +202,7 @@ impl Client for WebsocketClient {
             .expect("Failed to serialize JSON-RPC request.");
 
         self.sender
-            .send(serde_json::to_vec(&request)?)
+            .send(serde_json::to_string(&request)?)
             .await
             .unwrap();
 

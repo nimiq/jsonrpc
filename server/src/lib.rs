@@ -211,9 +211,9 @@ impl<D: Dispatcher> Server<D> {
             .and_then(move |body: Bytes| {
                 let inner = Arc::clone(&inner);
                 async move {
-                    let data = Self::handle_raw_request(inner, &Message::binary(body), None)
+                    let data = Self::handle_raw_request(inner, &Message::text(body), None)
                         .await
-                        .unwrap_or(Message::binary([]));
+                        .unwrap_or(Message::text(""));
 
                     let response = http::response::Builder::new()
                         .status(200)
@@ -352,7 +352,7 @@ impl<D: Dispatcher> Server<D> {
                         .expect("Failed to serialize JSON RPC response"),
                 )
             } else {
-                Message::binary(
+                Message::text(
                     serde_json::to_vec(&response).expect("Failed to serialize JSON RPC response"),
                 )
             }
@@ -700,7 +700,7 @@ where
 
     log::debug!("Sending notification: {:?}", notification);
 
-    tx.send(Message::binary(serde_json::to_vec(&notification)?))
+    tx.send(Message::text(serde_json::to_vec(&notification)?))
         .await?;
 
     Ok(())
