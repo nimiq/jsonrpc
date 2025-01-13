@@ -353,7 +353,7 @@ impl<D: Dispatcher> Server<D> {
                 )
             } else {
                 Message::text(
-                    serde_json::to_vec(&response).expect("Failed to serialize JSON RPC response"),
+                    serde_json::to_string(&response).expect("Failed to serialize JSON RPC response"),
                 )
             }
         })
@@ -700,7 +700,7 @@ where
 
     log::debug!("Sending notification: {:?}", notification);
 
-    tx.send(Message::text(serde_json::to_vec(&notification)?))
+    tx.send(Message::text(serde_json::to_string(&notification)?))
         .await?;
 
     Ok(())
