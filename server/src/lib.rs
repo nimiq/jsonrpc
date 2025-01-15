@@ -34,7 +34,7 @@ use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tokio::sync::{mpsc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 pub use warp::filters::ws::Message;
-use warp::Filter;
+use warp::{filters::cors::Builder, Filter};
 
 use nimiq_jsonrpc_core::{
     Request, Response, RpcError, Sensitive, SingleOrBatch, SubscriptionId, SubscriptionMessage,
@@ -64,7 +64,6 @@ pub enum Error {
 ///
 /// #TODO
 ///
-/// - CORS header
 /// - allowed methods
 ///
 #[derive(Clone, Debug)]
@@ -80,6 +79,9 @@ pub struct Config {
 
     /// Username and password for HTTP basic authentication.
     pub basic_auth: Option<Credentials>,
+
+    /// Cross-Origin Resource Sharing configuration
+    pub cors: Option<Cors>,
 }
 
 impl Default for Config {
@@ -89,12 +91,50 @@ impl Default for Config {
             enable_websocket: true,
             ip_whitelist: None,
             basic_auth: None,
+            cors: None,
         }
     }
 }
 
 fn blake2b(bytes: &[u8]) -> [u8; 32] {
     *Blake2b::<U32>::digest(bytes).as_ref()
+}
+
+#[derive(Clone, Debug)]
+/// CORS configuration
+pub struct Cors(Builder);
+
+impl Cors {
+    /// Create a new instance with `Content-Type` as mandatory header and `POST` as mandatory method.
+    pub fn new() -> Self {
+        Self(
+            warp::cors()
+                .allow_header("Content-Type")
+                .allow_method("POST"),
+        )
+    }
+
+    /// Configure CORS to only allow specific origins.
+    pub fn with_origins(mut self, origins: Vec<&str>) -> Self {
+        self.0 = self.0.allow_origins(origins);
+        self
+    }
+
+    /// Configure CORS to allow every origin. Also known as the `*` wildcard.
+    pub fn with_any_origin(mut self) -> Self {
+        self.0 = self.0.allow_any_origin();
+        self
+    }
+
+    pub(crate) fn into_wrapper(self) -> Builder {
+        self.0
+    }
+}
+
+impl Default for Cors {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Basic auth credentials, containing username and password.
@@ -253,6 +293,13 @@ impl<D: Dispatcher> Server<D> {
 
         warp::serve(
             root.and(json_rpc_route)
+                .with(
+                    self.inner
+                        .config
+                        .cors
+                        .clone()
+                        .map_or(warp::cors(), |cors| cors.into_wrapper()),
+                )
                 .recover(auth_filter::handle_auth_rejection),
         )
         .run(self.inner.config.bind_to)
