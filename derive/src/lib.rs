@@ -149,10 +149,12 @@ impl<'a> RpcMethod<'a> {
                             request,
                             move |params: #args_struct_ident| async move {
                                 let stream = self.#method_ident(#(#method_args),*).await?;
+                                let notifier = ::std::sync::Arc::new(::nimiq_jsonrpc_server::Notify::new());
+                                let listener = notifier.clone();
 
-                                let subscription = ::nimiq_jsonrpc_server::connect_stream(stream, tx, stream_id, #method_name.to_owned());
+                                let subscription = ::nimiq_jsonrpc_server::connect_stream(stream, tx, stream_id, #method_name.to_owned(), listener);
 
-                                Ok::<_, ::nimiq_jsonrpc_core::RpcError>(subscription)
+                                Ok::<_, ::nimiq_jsonrpc_core::RpcError>((subscription, Some(notifier)))
                             }
                         ).await
                     }
@@ -171,7 +173,7 @@ impl<'a> RpcMethod<'a> {
                     return ::nimiq_jsonrpc_server::dispatch_method_with_args(
                         request,
                         move |params: #args_struct_ident| async move {
-                            Ok::<_, ::nimiq_jsonrpc_core::RpcError>(self.#method_ident(#(#method_args),*).await?)
+                            Ok::<(_, Option<::std::sync::Arc<::nimiq_jsonrpc_server::Notify>>), ::nimiq_jsonrpc_core::RpcError>((self.#method_ident(#(#method_args),*).await?, None))
                         }
                     ).await
                 }
