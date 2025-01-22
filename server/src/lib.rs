@@ -19,7 +19,7 @@ use std::{
 use async_trait::async_trait;
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, State, WebSocketUpgrade},
+    extract::{DefaultBodyLimit, Query, State, WebSocketUpgrade},
     http::{header::CONTENT_TYPE, response::Builder, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse as _, Response as HttpResponse},
@@ -47,7 +47,8 @@ use tokio::{
 };
 
 use nimiq_jsonrpc_core::{
-    Request, Response, RpcError, Sensitive, SingleOrBatch, SubscriptionId, SubscriptionMessage,
+    FrameType, Request, Response, RpcError, Sensitive, SingleOrBatch, SubscriptionId,
+    SubscriptionMessage,
 };
 
 pub use axum::extract::ws::Message;
@@ -297,7 +298,7 @@ impl<D: Dispatcher> Server<D> {
         let http_router = Router::new().route(
             "/",
             post(|body: Bytes| async move {
-                let data = Self::handle_raw_request(inner, &Message::binary(body), None)
+                let data = Self::handle_raw_request(inner, &Message::binary(body), None, None)
                     .await
                     .unwrap_or(Message::Binary(Bytes::new()));
 
@@ -312,7 +313,11 @@ impl<D: Dispatcher> Server<D> {
         let inner = Arc::clone(&self.inner);
         let ws_router = Router::new().route(
             "/ws",
-            any(|ws: WebSocketUpgrade| async move { Self::upgrade_to_ws(inner, ws) }),
+            any(
+                |Query(params): Query<HashMap<String, String>>, ws: WebSocketUpgrade| async move {
+                    Self::upgrade_to_ws(inner, ws, params)
+                },
+            ),
         );
 
         let app = Router::new()
@@ -344,10 +349,18 @@ impl<D: Dispatcher> Server<D> {
     ///
     /// # TODO:
     ///
-    ///  - This sends stuff as binary websocket frames. It should really use text frames.
     ///  - Make the queue size configurable
     ///
-    fn upgrade_to_ws(inner: Arc<Inner<D>>, ws: WebSocketUpgrade) -> HttpResponse<Body> {
+    fn upgrade_to_ws(
+        inner: Arc<Inner<D>>,
+        ws: WebSocketUpgrade,
+        query_params: HashMap<String, String>,
+    ) -> HttpResponse<Body> {
+        let frame_type: Option<FrameType> = query_params
+            .get("frame")
+            .map(|frame_type| Some(frame_type.into()))
+            .unwrap_or_default();
+
         ws.on_upgrade(move |websocket| {
             let (mut tx, mut rx) = websocket.split();
 
@@ -383,6 +396,7 @@ impl<D: Dispatcher> Server<D> {
                             Arc::clone(&inner),
                             &message,
                             Some(&multiplex_tx),
+                            frame_type,
                         )
                         .await
                         {
@@ -409,14 +423,16 @@ impl<D: Dispatcher> Server<D> {
     ///  - `request`: The raw request data.
     ///  - `tx`: If the request was received over websocket, this the message queue over which the called function can
     ///          send notifications to the client (used for subscriptions).
+    ///  - `frame_type`: If the request was received over websocket, indicate whether notifications are send back as Text or Binary frames.
     ///
     async fn handle_raw_request(
         inner: Arc<Inner<D>>,
         request: &Message,
         tx: Option<&mpsc::Sender<Message>>,
+        frame_type: Option<FrameType>,
     ) -> Option<Message> {
         match serde_json::from_slice(request.clone().into_data().as_ref()) {
-            Ok(request) => Self::handle_request(inner, request, tx).await,
+            Ok(request) => Self::handle_request(inner, request, tx, frame_type).await,
             Err(_e) => {
                 log::error!("Received invalid JSON from client");
                 Some(SingleOrBatch::Single(Response::new_error(
@@ -447,21 +463,27 @@ impl<D: Dispatcher> Server<D> {
     ///  - `request`: The request that was received.
     ///  - `tx`: If the request was received over websocket, this the message queue over which the called function can
     ///          send notifications to the client (used for subscriptions).
+    ///  - `frame_type`: If the request was received over websocket, indicate whether notifications are send back as Text or Binary frames.
     ///
     async fn handle_request(
         inner: Arc<Inner<D>>,
         request: SingleOrBatch<Request>,
         tx: Option<&mpsc::Sender<Message>>,
+        frame_type: Option<FrameType>,
     ) -> Option<SingleOrBatch<Response>> {
         match request {
-            SingleOrBatch::Single(request) => Self::handle_single_request(inner, request, tx)
-                .await
-                .map(|(response, _)| SingleOrBatch::Single(response)),
+            SingleOrBatch::Single(request) => {
+                Self::handle_single_request(inner, request, tx, frame_type)
+                    .await
+                    .map(|(response, _)| SingleOrBatch::Single(response))
+            }
 
             SingleOrBatch::Batch(requests) => {
                 let futures = requests
                     .into_iter()
-                    .map(|request| Self::handle_single_request(Arc::clone(&inner), request, tx))
+                    .map(|request| {
+                        Self::handle_single_request(Arc::clone(&inner), request, tx, frame_type)
+                    })
                     .collect::<FuturesUnordered<_>>();
 
                 let responses = futures
@@ -479,6 +501,7 @@ impl<D: Dispatcher> Server<D> {
         inner: Arc<Inner<D>>,
         request: Request,
         tx: Option<&mpsc::Sender<Message>>,
+        frame_type: Option<FrameType>,
     ) -> Option<ResponseAndSubScriptionNotifier> {
         if request.method == "unsubscribe" {
             return Self::handle_unsubscribe_stream(request, inner).await;
@@ -490,7 +513,7 @@ impl<D: Dispatcher> Server<D> {
 
         log::debug!("request: {:#?}", request);
 
-        let response = dispatcher.dispatch(request, tx, id).await;
+        let response = dispatcher.dispatch(request, tx, id, frame_type).await;
 
         log::debug!("response: {:#?}", response);
 
@@ -565,6 +588,7 @@ pub trait Dispatcher: Send + Sync + 'static {
         request: Request,
         tx: Option<&mpsc::Sender<Message>>,
         id: u64,
+        frame_type: Option<FrameType>,
     ) -> Option<ResponseAndSubScriptionNotifier>;
 
     /// Returns whether a method should be dispatched with this dispatcher.
@@ -605,13 +629,14 @@ impl Dispatcher for ModularDispatcher {
         request: Request,
         tx: Option<&mpsc::Sender<Message>>,
         id: u64,
+        frame_type: Option<FrameType>,
     ) -> Option<ResponseAndSubScriptionNotifier> {
         for dispatcher in &mut self.dispatchers {
             let m = dispatcher.match_method(&request.method);
             log::debug!("Matching '{}' against dispatcher -> {}", request.method, m);
             log::debug!("Methods: {:?}", dispatcher.method_names());
             if m {
-                return dispatcher.dispatch(request, tx, id).await;
+                return dispatcher.dispatch(request, tx, id, frame_type).await;
             }
         }
 
@@ -674,10 +699,11 @@ where
         request: Request,
         tx: Option<&mpsc::Sender<Message>>,
         id: u64,
+        frame_type: Option<FrameType>,
     ) -> Option<ResponseAndSubScriptionNotifier> {
         if self.is_allowed(&request.method) {
             log::debug!("Dispatching method: {}", request.method);
-            self.inner.dispatch(request, tx, id).await
+            self.inner.dispatch(request, tx, id, frame_type).await
         } else {
             log::debug!("Method not allowed: {}", request.method);
             // If the method is not white-listed, pretend it doesn't exist.
@@ -833,6 +859,7 @@ async fn forward_notification<T>(
     tx: &mut mpsc::Sender<Message>,
     id: &SubscriptionId,
     method: &str,
+    frame_type: Option<FrameType>,
 ) -> Result<(), Error>
 where
     T: Serialize + Debug + Send + Sync,
@@ -846,8 +873,12 @@ where
 
     log::debug!("Sending notification: {:?}", notification);
 
-    tx.send(Message::binary(serde_json::to_vec(&notification)?))
-        .await?;
+    let message = match frame_type {
+        Some(FrameType::Text) => Message::text(serde_json::to_string(&notification)?),
+        Some(FrameType::Binary) | None => Message::binary(serde_json::to_vec(&notification)?),
+    };
+
+    tx.send(message).await?;
 
     Ok(())
 }
@@ -871,6 +902,7 @@ pub fn connect_stream<T, S>(
     stream_id: u64,
     method: String,
     notify_handler: Arc<Notify>,
+    frame_type: Option<FrameType>,
 ) -> SubscriptionId
 where
     T: Serialize + Debug + Send + Sync,
@@ -892,7 +924,7 @@ where
                     item = stream.next() => {
                         match item {
                             Some(notification) => {
-                                if let Err(error) = forward_notification(notification, &mut tx, &id, &method).await {
+                                if let Err(error) = forward_notification(notification, &mut tx, &id, &method, frame_type).await {
                                     // Break the loop when the channel is closed
                                     if let Error::Mpsc(_) = error {
                                         break;

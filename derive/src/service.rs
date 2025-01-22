@@ -92,6 +92,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
                 request: ::nimiq_jsonrpc_core::Request,
                 tx: Option<&::tokio::sync::mpsc::Sender<::nimiq_jsonrpc_server::Message>>,
                 stream_id: u64,
+                frame_type: Option<::nimiq_jsonrpc_core::FrameType>,
             ) -> Option<::nimiq_jsonrpc_server::ResponseAndSubScriptionNotifier> {
                 match request.method.as_str() {
                     #(#match_arms)*

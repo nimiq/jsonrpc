@@ -152,7 +152,7 @@ impl<'a> RpcMethod<'a> {
                                 let notifier = ::std::sync::Arc::new(::nimiq_jsonrpc_server::Notify::new());
                                 let listener = notifier.clone();
 
-                                let subscription = ::nimiq_jsonrpc_server::connect_stream(stream, tx, stream_id, #method_name.to_owned(), listener);
+                                let subscription = ::nimiq_jsonrpc_server::connect_stream(stream, tx, stream_id, #method_name.to_owned(), listener, frame_type);
 
                                 Ok::<_, ::nimiq_jsonrpc_core::RpcError>((subscription, Some(notifier)))
                             }

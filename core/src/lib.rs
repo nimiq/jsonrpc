@@ -35,6 +35,26 @@ pub enum Error {
     InvalidSubscriptionId(Value),
 }
 
+/// Indicate if a websocket frame response should be in Binary or Text
+#[derive(Copy, Clone, Default)]
+pub enum FrameType {
+    /// Binary frame type
+    #[default]
+    Binary,
+    /// Text frame type
+    Text,
+}
+
+impl From<&String> for FrameType {
+    fn from(value: &String) -> Self {
+        match value.as_str() {
+            "text" => FrameType::Text,
+            "binary" => FrameType::Binary,
+            _ => FrameType::Binary,
+        }
+    }
+}
+
 /// A JSON-RPC request or response can either be a single request or response, or a list of the former. This `enum`
 /// matches either for serialization and deserialization.
 ///
