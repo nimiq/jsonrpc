@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, fmt::Debug, str::FromStr, sync::Arc};
+use std::{collections::HashMap, fmt::Debug, str::FromStr, sync::Arc};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -213,7 +213,7 @@ impl Client for WebsocketClient {
         log::debug!("Sending request: {:?}", request);
 
         self.sender
-            .send(Message::Binary(serde_json::to_vec(&request)?))
+            .send(Message::binary(serde_json::to_vec(&request)?))
             .await?;
 
         let (tx, rx) = oneshot::channel();
@@ -267,7 +267,7 @@ impl Client for WebsocketClient {
             .sender
             .send(Message::Close(Some(CloseFrame {
                 code: CloseCode::Normal,
-                reason: Cow::from(""),
+                reason: "".into(),
             })))
             .await;
     }

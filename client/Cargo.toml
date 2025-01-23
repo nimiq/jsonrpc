@@ -15,15 +15,15 @@ async-stream = "0.3"
 async-trait = "0.1"
 base64 = { version = "0.22", optional = true }
 futures = "0.3"
-http = { version = "0.2", optional = true }
+http = { version = "1.2", optional = true }
 js-sys = { version = "0.3", optional = true }
 log = "0.4"
 reqwest = { version = "0.12", optional = true, features = ["json"] }
 serde = "1.0"
 serde_json = "1.0"
 thiserror = "1.0"
-tokio = { version = "1.25", features = ["net", "sync"], optional = true }
-tokio-tungstenite = { version = "0.20", optional = true }
+tokio = { version = "1.43", features = ["net", "sync"], optional = true }
+tokio-tungstenite = { version = "0.26", optional = true }
 url = "2.3"
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
