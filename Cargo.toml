@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Janosch Gräf <janosch@nimiq.com>", "The Nimiq Core Development Team <info@nimiq.com>"]
 edition = "2021"
 homepage = "https://nimiq.com"
@@ -29,7 +29,7 @@ categories = [
 keywords = ["json", "jsonrpc", "json-rpc", "nimiq", "rpc"]
 
 [workspace.dependencies]
-nimiq-jsonrpc-client = { version = "0.2.1", path = "client" }
-nimiq-jsonrpc-core = { version = "0.2.1", path = "core" }
-nimiq-jsonrpc-derive = { version = "0.2.1", path = "derive" }
-nimiq-jsonrpc-server = { version = "0.2.1", path = "server" }
+nimiq-jsonrpc-client = { version = "0.2.2", path = "client" }
+nimiq-jsonrpc-core = { version = "0.2.2", path = "core" }
+nimiq-jsonrpc-derive = { version = "0.2.2", path = "derive" }
+nimiq-jsonrpc-server = { version = "0.2.2", path = "server" }
