@@ -20,7 +20,11 @@ use async_trait::async_trait;
 use axum::{
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Query, State, WebSocketUpgrade},
-    http::{header::CONTENT_TYPE, response::Builder, HeaderValue, Method, StatusCode},
+    http::{
+        header::{AUTHORIZATION, CONTENT_TYPE},
+        response::Builder,
+        HeaderValue, Method, StatusCode,
+    },
     middleware::Next,
     response::{IntoResponse as _, Response as HttpResponse},
     routing::{any, post},
@@ -159,14 +163,14 @@ impl Cors {
     pub fn new() -> Self {
         Self(
             CorsLayer::new()
-                .allow_headers([CONTENT_TYPE])
+                .allow_headers([AUTHORIZATION, CONTENT_TYPE])
                 .allow_methods([Method::POST]),
         )
     }
 
     /// Configure CORS to only allow specific origins.
     /// Note that multiple calls to this method will override any previous origin-related calls.
-    pub fn with_origins(mut self, origins: Vec<&str>) -> Self {
+    pub fn with_origins(mut self, origins: Vec<String>) -> Self {
         self.0 = self.0.allow_origin::<Vec<HeaderValue>>(
             origins
                 .iter()
