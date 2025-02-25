@@ -755,11 +755,7 @@ where
 {
     let params = match request.params {
         Some(params) => params,
-        None => {
-            return error_response(request.id, || {
-                RpcError::invalid_params(Some("Missing request parameters.".to_owned()))
-            })
-        }
+        None => Value::Array(Vec::new()),
     };
 
     let params = match serde_json::from_value(params) {
