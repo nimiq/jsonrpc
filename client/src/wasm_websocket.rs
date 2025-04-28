@@ -4,7 +4,16 @@
 //!
 //! This is still experimental.
 
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, str::FromStr, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    fmt::Debug,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use async_trait::async_trait;
 use futures::stream::{BoxStream, StreamExt};
@@ -61,7 +70,7 @@ impl From<JsValue> for Error {
 pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
-    next_id: u64,
+    next_id: AtomicU64,
     sender: mpsc::Sender<Vec<u8>>,
 }
 
@@ -133,7 +142,7 @@ impl WebsocketClient {
 
         // Return the client
         Ok(Self {
-            next_id: 1,
+            next_id: AtomicU64::new(1),
             streams,
             requests,
             sender: msg_tx,
@@ -190,13 +199,12 @@ impl WebsocketClient {
 impl Client for WebsocketClient {
     type Error = Error;
 
-    async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
+    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Self::Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
-        let request_id = self.next_id;
-        self.next_id += 1;
+        let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
@@ -216,10 +224,7 @@ impl Client for WebsocketClient {
         Ok(rx.await?.into_result()?)
     }
 
-    async fn connect_stream<T: Unpin + 'static>(
-        &mut self,
-        id: SubscriptionId,
-    ) -> BoxStream<'static, T>
+    async fn connect_stream<T: Unpin + 'static>(&self, id: SubscriptionId) -> BoxStream<'static, T>
     where
         T: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
@@ -237,7 +242,7 @@ impl Client for WebsocketClient {
         stream.boxed()
     }
 
-    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error> {
+    async fn disconnect_stream(&self, id: SubscriptionId) -> Result<(), Self::Error> {
         if let Some(tx) = self.streams.write().await.remove(&id) {
             log::debug!("Closing stream of subscription ID: {}", id);
             drop(tx);
@@ -248,5 +253,5 @@ impl Client for WebsocketClient {
         Ok(())
     }
 
-    async fn close(&mut self) {}
+    async fn close(&self) {}
 }

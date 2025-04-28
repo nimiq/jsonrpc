@@ -1,4 +1,12 @@
-use std::{collections::HashMap, fmt::Debug, str::FromStr, sync::Arc};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    str::FromStr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -63,8 +71,8 @@ type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
 pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
-    sender: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
-    next_id: u64,
+    sender: RwLock<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>,
+    next_id: AtomicU64,
 }
 
 impl WebsocketClient {
@@ -129,8 +137,8 @@ impl WebsocketClient {
         }
 
         Ok(Self {
-            next_id: 1,
-            sender: ws_tx,
+            next_id: AtomicU64::new(1),
+            sender: RwLock::new(ws_tx),
             streams,
             requests,
         })
@@ -199,20 +207,20 @@ impl WebsocketClient {
 impl Client for WebsocketClient {
     type Error = Error;
 
-    async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
+    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Self::Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
-        let request_id = self.next_id;
-        self.next_id += 1;
-
+        let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
 
         log::debug!("Sending request: {:?}", request);
 
         self.sender
+            .write()
+            .await
             .send(Message::binary(serde_json::to_vec(&request)?))
             .await?;
 
@@ -228,10 +236,7 @@ impl Client for WebsocketClient {
         Ok(response.into_result()?)
     }
 
-    async fn connect_stream<T: Unpin + 'static>(
-        &mut self,
-        id: SubscriptionId,
-    ) -> BoxStream<'static, T>
+    async fn connect_stream<T: Unpin + 'static>(&self, id: SubscriptionId) -> BoxStream<'static, T>
     where
         T: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
@@ -248,7 +253,7 @@ impl Client for WebsocketClient {
         stream.boxed()
     }
 
-    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error> {
+    async fn disconnect_stream(&self, id: SubscriptionId) -> Result<(), Self::Error> {
         if let Some(tx) = self.streams.write().await.remove(&id) {
             log::debug!("Closing stream of subscription ID: {}", id);
             drop(tx);
@@ -260,11 +265,13 @@ impl Client for WebsocketClient {
     }
 
     /// Close the websocket connection
-    async fn close(&mut self) {
+    async fn close(&self) {
         // Try to send the close message
         // We don't do anything if it fails
         let _ = self
             .sender
+            .write()
+            .await
             .send(Message::Close(Some(CloseFrame {
                 code: CloseCode::Normal,
                 reason: "".into(),

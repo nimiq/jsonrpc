@@ -1,4 +1,7 @@
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -26,7 +29,7 @@ pub enum Error {
     #[error("Response ID doesn't match request ID: expected {expected}, but got {got:?}")]
     IdMismatch {
         /// The expected ID that was expected.
-        expected: usize,
+        expected: u64,
 
         /// The ID that the server replied with.
         got: Value,
@@ -35,7 +38,7 @@ pub enum Error {
 
 /// A JSON-HTTP client that sends the request via HTTP POST to an URL.
 pub struct HttpClient {
-    next_id: usize,
+    next_id: AtomicU64,
     client: reqwest::Client,
     url: Url,
     basic_auth: Option<Credentials>,
@@ -52,7 +55,7 @@ impl HttpClient {
     ///
     pub fn new(client: reqwest::Client, url: Url, basic_auth: Option<Credentials>) -> Self {
         Self {
-            next_id: 1,
+            next_id: AtomicU64::new(1),
             client,
             url,
             basic_auth,
@@ -74,13 +77,12 @@ impl HttpClient {
 impl Client for HttpClient {
     type Error = Error;
 
-    async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Error>
+    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
-        let request_id = self.next_id;
-        self.next_id += 1;
+        let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
@@ -114,13 +116,13 @@ impl Client for HttpClient {
         }
     }
 
-    async fn connect_stream<T>(&mut self, _id: SubscriptionId) -> BoxStream<'static, T> {
+    async fn connect_stream<T>(&self, _id: SubscriptionId) -> BoxStream<'static, T> {
         panic!("Streams are not supported by the HTTP client.");
     }
 
-    async fn disconnect_stream(&mut self, _id: SubscriptionId) -> Result<(), Self::Error> {
+    async fn disconnect_stream(&self, _id: SubscriptionId) -> Result<(), Self::Error> {
         panic!("Streams are not supported by the HTTP client.");
     }
 
-    async fn close(&mut self) {}
+    async fn close(&self) {}
 }

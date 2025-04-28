@@ -80,7 +80,7 @@ pub trait Client {
     /// Returns either the result that was responded with by the server, or an error. The error can be either a
     /// client-side error (e.g. a network error), or an error object sent by the server.
     ///
-    async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
+    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Self::Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync;
@@ -100,10 +100,7 @@ pub trait Client {
     ///
     /// If the client doesn't support receiving notifications, this method is allowed to panic.
     ///
-    async fn connect_stream<T: Unpin + 'static>(
-        &mut self,
-        id: SubscriptionId,
-    ) -> BoxStream<'static, T>
+    async fn connect_stream<T: Unpin + 'static>(&self, id: SubscriptionId) -> BoxStream<'static, T>
     where
         T: for<'de> Deserialize<'de> + Debug + Send + Sync;
 
@@ -122,10 +119,10 @@ pub trait Client {
     ///
     /// If the client doesn't support receiving notifications, this method is allowed to panic.
     ///
-    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error>;
+    async fn disconnect_stream(&self, id: SubscriptionId) -> Result<(), Self::Error>;
 
     /// Closes the client connection
-    async fn close(&mut self);
+    async fn close(&self);
 }
 
 /// Wraps a client into an `Arc<Mutex<_>>`, so that it can be cloned.
@@ -137,7 +134,7 @@ pub struct ArcClient<C> {
 impl<C: Client + Send> Client for ArcClient<C> {
     type Error = <C as Client>::Error;
 
-    async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
+    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Self::Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync,
@@ -145,21 +142,18 @@ impl<C: Client + Send> Client for ArcClient<C> {
         self.inner.lock().await.send_request(method, params).await
     }
 
-    async fn connect_stream<T: Unpin + 'static>(
-        &mut self,
-        id: SubscriptionId,
-    ) -> BoxStream<'static, T>
+    async fn connect_stream<T: Unpin + 'static>(&self, id: SubscriptionId) -> BoxStream<'static, T>
     where
         T: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         self.inner.lock().await.connect_stream(id).await
     }
 
-    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error> {
+    async fn disconnect_stream(&self, id: SubscriptionId) -> Result<(), Self::Error> {
         self.inner.lock().await.disconnect_stream(id).await
     }
 
-    async fn close(&mut self) {
+    async fn close(&self) {
         self.inner.lock().await.close().await
     }
 }

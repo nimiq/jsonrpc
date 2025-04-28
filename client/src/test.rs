@@ -1,22 +1,25 @@
 use std::{
     collections::HashMap,
-    sync::Arc,
-    fmt::Debug
+    fmt::Debug,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
-use tokio::{
-    sync::{mpsc, oneshot, RwLock},
-};
-use thiserror::Error;
-use serde::{Serialize, Deserialize};
-use futures::{
-    stream::{BoxStream, StreamExt, SplitSink},
-    sink::SinkExt,
-};
-use serde_json::Value;
 use async_trait::async_trait;
+use futures::{
+    sink::SinkExt,
+    stream::{BoxStream, SplitSink, StreamExt},
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use thiserror::Error;
+use tokio::sync::{mpsc, oneshot, RwLock};
 
-use nimiq_jsonrpc_core::{Request, Response, RequestOrResponse, SubscriptionMessage, SubscriptionId};
+use nimiq_jsonrpc_core::{
+    Request, RequestOrResponse, Response, SubscriptionId, SubscriptionMessage,
+};
 
 use crate::Client;
 
@@ -40,18 +43,15 @@ pub enum Error {
     MpscSend(#[from] mpsc::error::SendError<SubscriptionMessage<Value>>),
 }
 
-
 type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value>>>;
 type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
-
 
 pub struct TestClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
     sender: mpsc::Sender<Value>,
-    next_id: u64,
+    next_id: AtomicU64,
 }
-
 
 impl TestClient {
     /// Creates a new JSON-RPC websocket client.
@@ -78,14 +78,18 @@ impl TestClient {
         }
 
         Ok(Self {
-            next_id: 1,
+            next_id: AtomicU64::new(1),
             sender: ws_tx,
             streams,
             requests,
         })
     }
 
-    async fn handle_message(streams: &Arc<RwLock<StreamsMap>>, requests: &Arc<RwLock<RequestsMap>>, message: Value) -> Result<(), Error> {
+    async fn handle_message(
+        streams: &Arc<RwLock<StreamsMap>>,
+        requests: &Arc<RwLock<RequestsMap>>,
+        message: Value,
+    ) -> Result<(), Error> {
         log::debug!("Received message: {:?}", data);
 
         let message = RequestOrResponse::from_value(message)?;
@@ -94,8 +98,7 @@ impl TestClient {
             RequestOrResponse::Request(request) => {
                 if request.id.is_some() {
                     log::error!("Received unexpected request, which is not a notification.");
-                }
-                else {
+                } else {
                     if let Some(params) = request.params {
                         let message: SubscriptionMessage<Value> = serde_json::from_value(params)
                             .expect("Failed to deserialize request parameters");
@@ -103,24 +106,24 @@ impl TestClient {
                         let mut streams = streams.write().await;
                         if let Some(tx) = streams.get_mut(&message.subscription) {
                             tx.send(message).await?;
+                        } else {
+                            log::error!(
+                                "Notification for unknown stream ID: {}",
+                                message.subscription
+                            );
                         }
-                        else {
-                            log::error!("Notification for unknown stream ID: {}", message.subscription);
-                        }
-                    }
-                    else {
+                    } else {
                         log::error!("No 'params' field in notification.");
                     }
                 }
-            },
+            }
             RequestOrResponse::Response(response) => {
                 let mut requests = requests.write().await;
 
                 if let Some(tx) = response.id.as_u64().and_then(|id| requests.remove(&id)) {
                     drop(requests);
                     tx.send(response).ok();
-                }
-                else {
+                } else {
                     log::error!("Response for unknown request ID: {}", response.id);
                 }
             }
@@ -135,12 +138,11 @@ impl Client for TestClient {
     type Error = Error;
 
     async fn send_request<P, R>(&mut self, method: &str, params: &P) -> Result<R, Self::Error>
-        where
-            P: Serialize + Debug + Send + Sync,
-            R: for<'de> Deserialize<'de> + Debug + Send + Sync
+    where
+        P: Serialize + Debug + Send + Sync,
+        R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
-        let request_id = self.next_id;
-        self.next_id += 1;
+        let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
@@ -158,21 +160,19 @@ impl Client for TestClient {
     }
 
     async fn connect_stream<T>(&mut self, id: SubscriptionId) -> BoxStream<'static, T>
-        where
-            T: for<'de> Deserialize<'de> + Debug + Send + Sync
+    where
+        T: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let (tx, rx) = mpsc::channel(16);
 
         self.streams.write().await.insert(id, tx);
 
         Box::pin(rx.map(|message: SubscriptionMessage<Value>| {
-            serde_json::from_value(message.result)
-                .expect("Failed to deserialize notification")
+            serde_json::from_value(message.result).expect("Failed to deserialize notification")
         }))
     }
 
-    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error>
-    {
+    async fn disconnect_stream(&mut self, id: SubscriptionId) -> Result<(), Self::Error> {
         if let Some(tx) = self.streams.write().await.remove(id) {
             log::debug!("Closing stream of subscription ID: {}", id);
             drop(tx);
