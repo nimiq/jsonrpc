@@ -426,7 +426,7 @@ impl<D: Dispatcher> Server<D> {
     ///  - `inner`: Server state
     ///  - `request`: The raw request data.
     ///  - `tx`: If the request was received over websocket, this the message queue over which the called function can
-    ///          send notifications to the client (used for subscriptions).
+    ///    send notifications to the client (used for subscriptions).
     ///  - `frame_type`: If the request was received over websocket, indicate whether notifications are send back as Text or Binary frames.
     ///
     async fn handle_raw_request(
@@ -466,7 +466,7 @@ impl<D: Dispatcher> Server<D> {
     ///  - `inner`: Server state
     ///  - `request`: The request that was received.
     ///  - `tx`: If the request was received over websocket, this the message queue over which the called function can
-    ///          send notifications to the client (used for subscriptions).
+    ///    send notifications to the client (used for subscriptions).
     ///  - `frame_type`: If the request was received over websocket, indicate whether notifications are send back as Text or Binary frames.
     ///
     async fn handle_request(
