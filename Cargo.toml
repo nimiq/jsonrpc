@@ -13,7 +13,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Janosch Gräf <janosch@nimiq.com>", "The Nimiq Core Development Team <info@nimiq.com>"]
 edition = "2021"
 homepage = "https://nimiq.com"
