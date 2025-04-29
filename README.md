@@ -20,7 +20,7 @@ use nimiq_jsonrpc_client::http::HttpClient;
 #[nimiq_jsonrpc_derive::proxy]
 #[async_trait]
 trait Foobar {
-    async fn hello(&mut self, name: String) -> String;
+    async fn hello(&self, name: String) -> String;
 }
 
 struct FoobarService;
@@ -28,7 +28,7 @@ struct FoobarService;
 #[nimiq_jsonrpc_derive::service]
 #[async_trait]
 impl Foobar for FoobarService {
-    async fn hello(&mut self, name: String) -> String {
+    async fn hello(&self, name: String) -> String {
         println!("Hello, {}", name);
         format!("Hello, {}", name)
     }

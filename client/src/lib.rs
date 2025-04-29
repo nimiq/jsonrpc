@@ -11,7 +11,7 @@
 //! #[async_trait]
 //! trait Foobar {
 //!     type Error;
-//!     async fn hello(&mut self, name: String) -> Result<String, Self::Error>;
+//!     async fn hello(&self, name: String) -> Result<String, Self::Error>;
 //! }
 //!```
 //!

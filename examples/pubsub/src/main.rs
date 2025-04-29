@@ -14,7 +14,7 @@ trait HelloWorld {
     type Error;
 
     #[stream]
-    async fn hello_subscribe(&mut self) -> Result<BoxStream<'static, String>, Self::Error>;
+    async fn hello_subscribe(&self) -> Result<BoxStream<'static, String>, Self::Error>;
 }
 
 struct HelloWorldService;
@@ -25,7 +25,7 @@ impl HelloWorld for HelloWorldService {
     type Error = ();
 
     #[stream]
-    async fn hello_subscribe(&mut self) -> Result<BoxStream<'static, String>, Self::Error> {
+    async fn hello_subscribe(&self) -> Result<BoxStream<'static, String>, Self::Error> {
         log::info!("Client subscribed");
 
         let mut interval = tokio::time::interval(Duration::from_secs(1));
@@ -63,7 +63,7 @@ async fn main() {
 
     let url = "ws://localhost:8000/ws".parse().unwrap();
     let client = WebsocketClient::with_url(url).await.unwrap();
-    let mut proxy = HelloWorldProxy::new(client);
+    let proxy = HelloWorldProxy::new(client);
 
     let mut stream = proxy.hello_subscribe().await.unwrap();
 

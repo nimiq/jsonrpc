@@ -25,7 +25,7 @@ struct HelloWorldData {
 trait HelloWorld {
     type Error;
 
-    async fn hello(&mut self, name: String, x: HelloWorldData) -> Result<String, Self::Error>;
+    async fn hello(&self, name: String, x: HelloWorldData) -> Result<String, Self::Error>;
 }
 
 /// Define a service that implements our `HelloWorld` RPC interface.
@@ -45,7 +45,7 @@ impl HelloWorld for HelloWorldService {
     type Error = ();
 
     /// Here we implement a method that then can be called from a remote client.
-    async fn hello(&mut self, name: String, x: HelloWorldData) -> Result<String, Self::Error> {
+    async fn hello(&self, name: String, x: HelloWorldData) -> Result<String, Self::Error> {
         Ok(format!("Hello, {}: x={:?}", name, x))
     }
 }
@@ -87,7 +87,7 @@ async fn main() {
         "http://localhost:8000/".parse().unwrap(),
         Some(credentials.clone()),
     );
-    let mut proxy = HelloWorldProxy::new(client);
+    let proxy = HelloWorldProxy::new(client);
     let retval = proxy
         .hello("World".to_owned(), HelloWorldData { a: 42 })
         .await
@@ -98,7 +98,7 @@ async fn main() {
     let client = WebsocketClient::new("ws://localhost:8000/ws".parse().unwrap(), Some(credentials))
         .await
         .unwrap();
-    let mut proxy = HelloWorldProxy::new(client);
+    let proxy = HelloWorldProxy::new(client);
     let retval = proxy
         .hello("World".to_owned(), HelloWorldData { a: 42 })
         .await

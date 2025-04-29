@@ -215,7 +215,7 @@ impl<'a> RpcMethod<'a> {
         };
 
         quote! {
-            async fn #method_ident(&mut self, #(#method_args),*) #output {
+            async fn #method_ident(&self, #(#method_args),*) #output {
                 let args = #args_struct_ident {
                     #(#struct_fields),*
                 };

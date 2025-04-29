@@ -23,7 +23,7 @@ struct HelloWorldData {
 trait HelloWorld {
     type Error;
 
-    async fn hello(&mut self, name: String, x: HelloWorldData) -> Result<String, Self::Error>;
+    async fn hello(&self, name: String, x: HelloWorldData) -> Result<String, Self::Error>;
 }
 
 /// Define a service that implements our `HelloWorld` RPC interface.
@@ -43,7 +43,7 @@ impl HelloWorld for HelloWorldService {
     type Error = ();
 
     /// Here we implement a method that then can be called from a remote client.
-    async fn hello(&mut self, name: String, x: HelloWorldData) -> Result<String, Self::Error> {
+    async fn hello(&self, name: String, x: HelloWorldData) -> Result<String, Self::Error> {
         Ok(format!("Hello, {}: x={:?}", name, x))
     }
 }
@@ -82,7 +82,7 @@ async fn main() {
     let client = HttpClient::with_url("http://localhost:8000/".parse().unwrap());
 
     // Next we can use the proxy that we generated earlier and construct it with the client.
-    let mut proxy = HelloWorldProxy::new(client);
+    let proxy = HelloWorldProxy::new(client);
 
     // The proxy implements our `HelloWorld` RPC interface and will send a request to the server, when a method is
     // called.
