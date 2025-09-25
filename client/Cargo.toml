@@ -23,7 +23,7 @@ serde = "1.0"
 serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.43", features = ["net", "sync"], optional = true }
-tokio-tungstenite = { version = "0.27", optional = true, features =  ["native-tls"] }
+tokio-tungstenite = { version = "0.28", optional = true, features =  ["native-tls"] }
 url = "2.3"
 wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
