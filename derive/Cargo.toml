@@ -14,7 +14,7 @@ keywords.workspace = true
 proc-macro = true
 
 [dependencies]
-darling = "0.21"
+darling = "0.23"
 heck = "0.5"
 proc-macro2 = "1.0"
 quote = "1.0"
