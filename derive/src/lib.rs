@@ -30,6 +30,15 @@ pub fn proxy(
 #[derive(Clone, Debug, Default)]
 struct MethodAttributes {
     stream: Option<Attribute>,
+    deprecated: Option<Deprecation>,
+}
+
+/// Information extracted from a `#[deprecated]` attribute on an RPC method.
+#[derive(Clone, Debug, Default)]
+struct Deprecation {
+    /// The optional note (e.g. `#[deprecated = "use foo instead"]` or
+    /// `#[deprecated(note = "...")]`).
+    note: Option<String>,
 }
 
 impl MethodAttributes {
@@ -40,6 +49,11 @@ impl MethodAttributes {
             if attr.path().is_ident("stream") {
                 attrs.stream = Some(attr.clone());
                 false
+            } else if attr.path().is_ident("deprecated") {
+                // Detect, but *keep*, the native `#[deprecated]` attribute so that it stays on the
+                // generated trait/impl and Rust callers still get a compile-time warning.
+                attrs.deprecated = Some(parse_deprecation(attr));
+                true
             } else {
                 true
             }
@@ -47,6 +61,39 @@ impl MethodAttributes {
 
         attrs
     }
+}
+
+/// Extracts the optional `note` from a `#[deprecated]` attribute in any of its supported forms:
+/// `#[deprecated]`, `#[deprecated = "..."]`, or `#[deprecated(note = "...", since = "...")]`.
+fn parse_deprecation(attr: &Attribute) -> Deprecation {
+    let mut note = None;
+
+    match &attr.meta {
+        syn::Meta::NameValue(nv) => {
+            if let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = &nv.value
+            {
+                note = Some(s.value());
+            }
+        }
+        syn::Meta::List(_) => {
+            // Ignore parse errors here: an invalid `#[deprecated(...)]` is reported by the
+            // compiler anyway since we leave the attribute in place.
+            let _ = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("note") {
+                    let value = meta.value()?;
+                    let s: syn::LitStr = value.parse()?;
+                    note = Some(s.value());
+                }
+                Ok(())
+            });
+        }
+        syn::Meta::Path(_) => {}
+    }
+
+    Deprecation { note }
 }
 
 pub(crate) struct RpcMethod<'a> {
@@ -130,6 +177,30 @@ impl<'a> RpcMethod<'a> {
         tokens
     }
 
+    /// Returns `true` if this method is marked with `#[deprecated]`.
+    pub fn is_deprecated(&self) -> bool {
+        self.attrs.deprecated.is_some()
+    }
+
+    /// Generates the statement that logs a warning when a deprecated method is dispatched. Expands
+    /// to nothing for methods that aren't deprecated.
+    fn generate_deprecation_warning(&self) -> TokenStream {
+        match &self.attrs.deprecated {
+            Some(deprecation) => {
+                let method_name = &self.method_name;
+                let note = match &deprecation.note {
+                    Some(note) => {
+                        let note = Literal::string(note);
+                        quote! { Some(#note) }
+                    }
+                    None => quote! { None },
+                };
+                quote! { ::nimiq_jsonrpc_server::log_deprecated(#method_name, #note); }
+            }
+            None => quote! {},
+        }
+    }
+
     pub fn generate_dispatcher_match_arm(&self) -> TokenStream {
         let method_args = self
             .args
@@ -140,10 +211,12 @@ impl<'a> RpcMethod<'a> {
         let method_ident = &self.signature.ident;
         let method_name = &self.method_name;
         let method_name_literal = &self.method_name_literal;
+        let deprecation_warning = self.generate_deprecation_warning();
 
         if self.attrs.stream.is_some() {
             quote! {
                 #method_name_literal => {
+                    #deprecation_warning
                     if let Some(tx) = tx {
                         return ::nimiq_jsonrpc_server::dispatch_method_with_args(
                             request,
@@ -170,6 +243,7 @@ impl<'a> RpcMethod<'a> {
         } else {
             quote! {
                 #method_name_literal => {
+                    #deprecation_warning
                     return ::nimiq_jsonrpc_server::dispatch_method_with_args(
                         request,
                         move |params: #args_struct_ident| async move {
