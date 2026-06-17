@@ -7,6 +7,7 @@ edition.workspace = true
 description = "Core utilities for implementing libraries around JSON-RPC"
 homepage.workspace = true
 repository.workspace = true
+readme.workspace = true
 categories.workspace = true
 keywords.workspace = true
 
