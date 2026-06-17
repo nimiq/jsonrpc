@@ -60,16 +60,20 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
 
     let mut args_structs = vec![];
     let mut method_impls = vec![];
+    let mut any_deprecated = false;
 
     let rename_all: Option<RenameAll> = args.rename_all.as_ref().map(|r| r.parse().unwrap());
 
     for item in &mut tr.items {
         if let TraitItem::Fn(method) = item {
+            // On a trait definition `#[deprecated]` is legal, and keeping it in place is what
+            // gives Rust callers of the proxy a compile-time deprecation warning.
             let method = RpcMethod::new(
                 &method.sig,
                 &args_struct_prefix,
                 &mut method.attrs,
                 &rename_all,
+                false,
             );
 
             let method_code = method.generate_proxy_method();
@@ -77,10 +81,21 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
             //println!("Generated proxy method:");
             //println!("{}", method_code);
 
+            any_deprecated |= method.is_deprecated();
             args_structs.push(method.generate_args_struct());
             method_impls.push(method_code);
         }
     }
+
+    // rustc currently doesn't lint merely *implementing* a deprecated trait method, but the
+    // `allow` keeps the generated impl compiling under a downstream `deny(deprecated)` or
+    // `deny(warnings)` if it ever starts to. It is only emitted when the trait actually has
+    // deprecated methods, so that other proxies keep compiling under `#![forbid(deprecated)]`.
+    let impl_allow = if any_deprecated {
+        quote! { #[allow(deprecated)] }
+    } else {
+        quote! {}
+    };
 
     quote! {
         #(#args_structs)*
@@ -102,6 +117,7 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
         }
 
         #[::async_trait::async_trait]
+        #impl_allow
         impl<C> #trait_ident for #struct_ident<C>
             where C: ::nimiq_jsonrpc_client::Client + ::std::marker::Send + ::std::marker::Sync
         {
