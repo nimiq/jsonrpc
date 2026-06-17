@@ -20,9 +20,7 @@ jobs:
         key: cargo-${{ hashFiles('**/Cargo.toml') }}
     - uses: dtolnay/rust-toolchain@stable
       with:
-        profile: minimal
         toolchain: stable
-        override: true
         components: rustfmt
     - uses: actions-rs/cargo@v1
       with:
@@ -45,9 +43,7 @@ jobs:
         key: cargo-${{ hashFiles('**/Cargo.toml') }}
     - uses: dtolnay/rust-toolchain@stable
       with:
-        profile: minimal
         toolchain: stable
-        override: true
         components: llvm-tools-preview
     - name: Run tests
       run: cargo test --all-features
@@ -67,9 +63,7 @@ jobs:
         key: cargo-${{ hashFiles('**/Cargo.toml') }}
     - uses: dtolnay/rust-toolchain@stable
       with:
-        profile: minimal
         toolchain: stable
-        override: true
         components: clippy
     - uses: actions-rs/clippy-check@v1
       with:
