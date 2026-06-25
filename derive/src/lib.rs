@@ -5,7 +5,7 @@ use darling::FromMeta;
 use heck::{ToKebabCase, ToLowerCamelCase, ToShoutySnakeCase, ToSnakeCase, ToUpperCamelCase};
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote};
-use syn::{Attribute, FnArg, Ident, Pat, Signature, Type};
+use syn::{spanned::Spanned, Attribute, FnArg, Ident, Pat, Signature, Type};
 
 use proxy::proxy_macro;
 use service::service_macro;
@@ -51,7 +51,7 @@ impl MethodAttributes {
 
 pub(crate) struct RpcMethod<'a> {
     signature: &'a Signature,
-    args: Vec<(&'a Ident, &'a Type)>,
+    args: Vec<(Ident, &'a Type)>,
     method_name: String,
     method_name_literal: Literal,
     args_struct_ident: Ident,
@@ -67,6 +67,7 @@ impl<'a> RpcMethod<'a> {
     ) -> Self {
         let mut has_self = false;
         let mut args = vec![];
+        let rename_all = rename_all.as_ref();
 
         for arg in &signature.inputs {
             match arg {
@@ -75,7 +76,10 @@ impl<'a> RpcMethod<'a> {
                 }
                 FnArg::Typed(pat_type) => {
                     let ident = match &*pat_type.pat {
-                        Pat::Ident(ty) => &ty.ident,
+                        Pat::Ident(ty) => {
+                            let name = RenameAll::rename_or(rename_all, ty.ident.to_string());
+                            Ident::new(&name, ty.span())
+                        }
                         _ => panic!("Arguments must not be patterns."),
                     };
                     args.push((ident, &*pat_type.ty));
@@ -90,11 +94,7 @@ impl<'a> RpcMethod<'a> {
         let attrs = MethodAttributes::parse(attrs);
         //println!("Method attributes: {:?}", attrs);
 
-        let method_name = signature.ident.to_string();
-        let method_name = rename_all
-            .as_ref()
-            .map(|r| r.rename(&method_name))
-            .unwrap_or(method_name);
+        let method_name = RenameAll::rename_or(rename_all, signature.ident.to_string());
         let method_name_literal = Literal::string(&method_name);
 
         let args_struct_ident = format_ident!("{}_{}", args_struct_prefix, signature.ident);
@@ -120,6 +120,7 @@ impl<'a> RpcMethod<'a> {
         let tokens = quote! {
             #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
             #[allow(non_camel_case_types)]
+            #[allow(non_snake_case)]
             struct #args_struct_ident {
                 #(#struct_fields)*
             }
@@ -215,6 +216,7 @@ impl<'a> RpcMethod<'a> {
         };
 
         quote! {
+            #[allow(non_snake_case)]
             async fn #method_ident(&self, #(#method_args),*) #output {
                 let args = #args_struct_ident {
                     #(#struct_fields),*
@@ -257,6 +259,14 @@ impl FromStr for RenameAll {
 }
 
 impl RenameAll {
+    /// Applies `rename_all` to `name` when present, otherwise returns `name` unchanged.
+    pub fn rename_or(rename_all: Option<&RenameAll>, name: String) -> String {
+        match rename_all {
+            Some(r) => r.rename(&name),
+            None => name,
+        }
+    }
+
     pub fn rename(&self, name: &str) -> String {
         match self {
             RenameAll::Camel => name.to_upper_camel_case(),
