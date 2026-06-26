@@ -57,6 +57,31 @@ async fn main() {
 }
 ```
 
+# Deprecating methods
+
+RPC methods can be marked with the standard Rust `#[deprecated]` attribute, in either a `#[proxy]`
+trait or a `#[service]` impl:
+
+```rust
+#[nimiq_jsonrpc_derive::proxy]
+#[async_trait]
+trait Foobar {
+    #[deprecated = "use `hello` instead"]
+    async fn hi(&self, name: String) -> String;
+    async fn hello(&self, name: String) -> String;
+}
+```
+
+This gives you reporting at three levels:
+
+ - **Rust callers** of the generated proxy get a compile-time deprecation warning (the standard
+   `#[deprecated]` behaviour).
+ - **The server** logs a warning (via the `log` crate) every time a deprecated method is dispatched,
+   so operators can see who is still calling it.
+ - **Any client** (in any language) can query the built-in `rpc.deprecatedMethods` method to get the
+   list of deprecated method names, and `rpc.methods` for the full list. This is also exposed in Rust
+   through `Dispatcher::deprecated_methods()`.
+
 # TODO
 
  - [_] Share code between websocket clients.
