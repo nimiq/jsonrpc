@@ -771,6 +771,34 @@ where
     response(request.id, result)
 }
 
+/// Emits a deprecation warning if the request supplies any parameter under its
+/// pre-`rename_all` name.
+///
+/// When a service is annotated with `rename_all`, the renamed parameters are
+/// still accepted under their original (legacy) names via a serde `alias`, to
+/// give clients time to migrate. This helper lets operators observe whether any
+/// client is still relying on that shim. It is a no-op unless a legacy name is
+/// actually present in the request.
+///
+/// This is a helper function used by implementations of `Dispatcher`.
+pub fn warn_on_legacy_param_names(
+    params: &Option<Value>,
+    method: &str,
+    legacy_param_names: &[&str],
+) {
+    if let Some(Value::Object(obj)) = params {
+        if legacy_param_names
+            .iter()
+            .any(|name| obj.contains_key(*name))
+        {
+            log::warn!(
+                "RPC call to '{}' used a deprecated parameter name; update the client to the renamed parameters",
+                method
+            );
+        }
+    }
+}
+
 /// Read the request and call a handler function if possible. This variant accepts calls without arguments.
 ///
 /// This is a helper function used by implementations of `Dispatcher`.
