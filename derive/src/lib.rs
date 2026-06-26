@@ -5,7 +5,7 @@ use darling::FromMeta;
 use heck::{ToKebabCase, ToLowerCamelCase, ToShoutySnakeCase, ToSnakeCase, ToUpperCamelCase};
 use proc_macro2::{Literal, TokenStream};
 use quote::{format_ident, quote};
-use syn::{spanned::Spanned, Attribute, FnArg, Ident, Pat, Signature, Type};
+use syn::{Attribute, FnArg, Ident, Pat, Signature, Type};
 
 use proxy::proxy_macro;
 use service::service_macro;
@@ -49,9 +49,24 @@ impl MethodAttributes {
     }
 }
 
+/// A single RPC method argument.
+///
+/// The Rust field/parameter name is always the original `snake_case` `ident`.
+/// When `rename_all` produces a *different* wire name, it is stored in `rename`
+/// and emitted as a `#[serde(rename = "<new>", alias = "<original>")]` attribute
+/// on the generated args struct — so the new name is sent on the wire while the
+/// original name is still accepted on deserialization (a backward-compatible
+/// transition shim). `rename` is `None` when no `rename_all` is configured, or
+/// when it maps the name to itself.
+struct RpcArg<'a> {
+    ident: Ident,
+    rename: Option<String>,
+    ty: &'a Type,
+}
+
 pub(crate) struct RpcMethod<'a> {
     signature: &'a Signature,
-    args: Vec<(Ident, &'a Type)>,
+    args: Vec<RpcArg<'a>>,
     method_name: String,
     method_name_literal: Literal,
     args_struct_ident: Ident,
@@ -76,13 +91,19 @@ impl<'a> RpcMethod<'a> {
                 }
                 FnArg::Typed(pat_type) => {
                     let ident = match &*pat_type.pat {
-                        Pat::Ident(ty) => {
-                            let name = RenameAll::rename_or(rename_all, ty.ident.to_string());
-                            Ident::new(&name, ty.span())
-                        }
+                        Pat::Ident(ty) => ty.ident.clone(),
                         _ => panic!("Arguments must not be patterns."),
                     };
-                    args.push((ident, &*pat_type.ty));
+                    // Keep the original `snake_case` identifier as the Rust field name;
+                    // only record a wire rename when `rename_all` actually changes it.
+                    let original = ident.to_string();
+                    let renamed = RenameAll::rename_or(rename_all, original.clone());
+                    let rename = (renamed != original).then_some(renamed);
+                    args.push(RpcArg {
+                        ident,
+                        rename,
+                        ty: &pat_type.ty,
+                    });
                 }
             }
         }
@@ -113,14 +134,25 @@ impl<'a> RpcMethod<'a> {
         let struct_fields = self
             .args
             .iter()
-            .map(|(ident, ty)| quote! { #ident: #ty, })
+            .map(|arg| {
+                let RpcArg { ident, rename, ty } = arg;
+                // When `rename_all` changed the name, send the new name on the wire
+                // (`rename`) but still accept the original name (`alias`).
+                let serde_attr = match rename {
+                    Some(new) => {
+                        let old = ident.to_string();
+                        quote! { #[serde(rename = #new, alias = #old)] }
+                    }
+                    None => quote! {},
+                };
+                quote! { #serde_attr #ident: #ty, }
+            })
             .collect::<Vec<TokenStream>>();
         let args_struct_ident = &self.args_struct_ident;
 
         let tokens = quote! {
             #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
             #[allow(non_camel_case_types)]
-            #[allow(non_snake_case)]
             struct #args_struct_ident {
                 #(#struct_fields)*
             }
@@ -135,7 +167,10 @@ impl<'a> RpcMethod<'a> {
         let method_args = self
             .args
             .iter()
-            .map(|(ident, _)| quote! { params.#ident })
+            .map(|arg| {
+                let ident = &arg.ident;
+                quote! { params.#ident }
+            })
             .collect::<Vec<TokenStream>>();
         let args_struct_ident = &self.args_struct_ident;
         let method_ident = &self.signature.ident;
@@ -198,13 +233,19 @@ impl<'a> RpcMethod<'a> {
         let method_args = self
             .args
             .iter()
-            .map(|(ident, ty)| quote! { #ident: #ty })
+            .map(|arg| {
+                let (ident, ty) = (&arg.ident, arg.ty);
+                quote! { #ident: #ty }
+            })
             .collect::<Vec<TokenStream>>();
 
         let struct_fields = self
             .args
             .iter()
-            .map(|(ident, _)| quote! { #ident })
+            .map(|arg| {
+                let ident = &arg.ident;
+                quote! { #ident }
+            })
             .collect::<Vec<TokenStream>>();
 
         let transform_return_value = if self.attrs.stream.is_some() {
@@ -216,7 +257,6 @@ impl<'a> RpcMethod<'a> {
         };
 
         quote! {
-            #[allow(non_snake_case)]
             async fn #method_ident(&self, #(#method_args),*) #output {
                 let args = #args_struct_ident {
                     #(#struct_fields),*
