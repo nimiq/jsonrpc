@@ -177,9 +177,31 @@ impl<'a> RpcMethod<'a> {
         let method_name = &self.method_name;
         let method_name_literal = &self.method_name_literal;
 
+        // Warn (once per call) if a client still sends a renamed parameter under its
+        // original (legacy) name, which is accepted via a serde `alias`. Emitted only
+        // when at least one parameter was actually renamed.
+        let legacy_param_names = self
+            .args
+            .iter()
+            .filter(|arg| arg.rename.is_some())
+            .map(|arg| arg.ident.to_string())
+            .collect::<Vec<String>>();
+        let warn_legacy_params = if legacy_param_names.is_empty() {
+            quote! {}
+        } else {
+            quote! {
+                ::nimiq_jsonrpc_server::warn_on_legacy_param_names(
+                    &request.params,
+                    #method_name_literal,
+                    &[#(#legacy_param_names),*],
+                );
+            }
+        };
+
         if self.attrs.stream.is_some() {
             quote! {
                 #method_name_literal => {
+                    #warn_legacy_params
                     if let Some(tx) = tx {
                         return ::nimiq_jsonrpc_server::dispatch_method_with_args(
                             request,
@@ -206,6 +228,7 @@ impl<'a> RpcMethod<'a> {
         } else {
             quote! {
                 #method_name_literal => {
+                    #warn_legacy_params
                     return ::nimiq_jsonrpc_server::dispatch_method_with_args(
                         request,
                         move |params: #args_struct_ident| async move {
