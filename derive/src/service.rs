@@ -49,6 +49,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
     let mut match_arms = vec![];
     let mut name_match_arms = vec![];
     let mut method_names = vec![];
+    let mut deprecated_method_names = vec![];
 
     let struct_path = match &*im.self_ty {
         Type::Path(path) => &path.path,
@@ -79,6 +80,10 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
             match_arms.push(match_arm);
             name_match_arms.push(method.generate_dispatcher_method_matcher());
             method_names.push(quote! { #method_name_lit });
+
+            if method.is_deprecated() {
+                deprecated_method_names.push(quote! { #method_name_lit });
+            }
         }
     }
 
@@ -87,6 +92,9 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
 
         #[::async_trait::async_trait]
         impl ::nimiq_jsonrpc_server::Dispatcher for #struct_path {
+            // The methods this dispatcher calls may carry `#[deprecated]`; dispatching them
+            // internally is intentional, so silence the resulting warning.
+            #[allow(deprecated)]
             async fn dispatch(
                 &mut self,
                 request: ::nimiq_jsonrpc_core::Request,
@@ -110,6 +118,12 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
             fn method_names(&self) -> Vec<&str> {
                 vec![
                     #(#method_names),*
+                ]
+            }
+
+            fn deprecated_methods(&self) -> Vec<&str> {
+                vec![
+                    #(#deprecated_method_names),*
                 ]
             }
         }

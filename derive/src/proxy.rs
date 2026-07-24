@@ -102,6 +102,7 @@ fn impl_service(tr: &mut ItemTrait, args: &ProxyMeta) -> TokenStream {
         }
 
         #[::async_trait::async_trait]
+        #[allow(deprecated)]
         impl<C> #trait_ident for #struct_ident<C>
             where C: ::nimiq_jsonrpc_client::Client + ::std::marker::Send + ::std::marker::Sync
         {
