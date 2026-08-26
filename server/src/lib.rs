@@ -314,19 +314,26 @@ impl<D: Dispatcher> Server<D> {
             }),
         );
 
-        let inner = Arc::clone(&self.inner);
-        let ws_router = Router::new().route(
-            "/ws",
-            any(
-                |Query(params): Query<HashMap<String, String>>, ws: WebSocketUpgrade| async move {
-                    Self::upgrade_to_ws(inner, ws, params)
-                },
-            ),
-        );
+        let mut app = Router::new().merge(http_router);
 
-        let app = Router::new()
-            .merge(http_router)
-            .merge(ws_router)
+        // The `/ws` route is only mounted when websocket support is enabled, so that disabling it
+        // actually removes the endpoint instead of just being advisory
+        if self.inner.config.enable_websocket {
+            let inner = Arc::clone(&self.inner);
+            let ws_router = Router::new().route(
+                "/ws",
+                any(
+                    |Query(params): Query<HashMap<String, String>>,
+                     ws: WebSocketUpgrade| async move {
+                        Self::upgrade_to_ws(inner, ws, params)
+                    },
+                ),
+            );
+
+            app = app.merge(ws_router);
+        }
+
+        let app = app
             .route_layer(axum::middleware::from_fn_with_state(
                 Arc::clone(&self.inner),
                 basic_auth_middleware,
