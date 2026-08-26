@@ -19,7 +19,7 @@ use std::{
 use async_trait::async_trait;
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Query, State, WebSocketUpgrade},
+    extract::{ConnectInfo, DefaultBodyLimit, Query, State, WebSocketUpgrade},
     http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
         response::Builder,
@@ -97,6 +97,11 @@ pub struct Config {
     pub enable_websocket: bool,
 
     /// Allowed IPs. If `None`, all source IPs are allowed.
+    ///
+    /// This is matched against the address of the peer that opened the connection, so it offers no
+    /// protection when the server sits behind a reverse proxy: every request then originates from
+    /// the proxy itself. IPv4-mapped IPv6 addresses are canonicalized before being matched, so an
+    /// IPv4 entry also matches a client that reaches a dual-stack socket.
     pub ip_whitelist: Option<HashSet<IpAddr>>,
 
     /// Username and password for HTTP basic authentication.
@@ -151,6 +156,41 @@ async fn basic_auth_middleware<D: Dispatcher>(
     } else {
         // Invalid username and/or password provided
         StatusCode::UNAUTHORIZED.into_response()
+    }
+}
+
+async fn ip_whitelist_middleware<D: Dispatcher>(
+    State(state): State<Arc<Inner<D>>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> HttpResponse {
+    let ip_whitelist = if let Some(ip_whitelist) = &state.config.ip_whitelist {
+        ip_whitelist
+    } else {
+        // No IP whitelist is configured, so every source IP is allowed
+        return next.run(request).await;
+    };
+
+    // The whitelist cannot be enforced without knowing where the request came from, so a missing
+    // source address is rejected instead of being let through
+    let connect_info = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(source_address)| *source_address);
+    let source_address = if let Some(source_address) = connect_info {
+        source_address
+    } else {
+        log::error!("Rejecting request with an unknown source address");
+        return StatusCode::FORBIDDEN.into_response();
+    };
+
+    // A client connecting over IPv4 to a dual-stack socket is reported as an IPv4-mapped IPv6
+    // address, which would never match an IPv4 whitelist entry
+    if ip_whitelist.contains(&source_address.ip().to_canonical()) {
+        next.run(request).await
+    } else {
+        log::debug!("Rejecting request from {}: not whitelisted", source_address);
+        StatusCode::FORBIDDEN.into_response()
     }
 }
 
@@ -338,6 +378,11 @@ impl<D: Dispatcher> Server<D> {
                 Arc::clone(&self.inner),
                 basic_auth_middleware,
             ))
+            // Applied last so that it wraps the basic auth check and runs before it
+            .route_layer(axum::middleware::from_fn_with_state(
+                Arc::clone(&self.inner),
+                ip_whitelist_middleware,
+            ))
             .layer(DefaultBodyLimit::max(1024 * 1024 /* 1MB */))
             .layer(
                 self.inner
@@ -350,7 +395,12 @@ impl<D: Dispatcher> Server<D> {
             .with_state(Arc::clone(&self.inner));
 
         let listener = TcpListener::bind(self.inner.config.bind_to).await.unwrap();
-        axum::serve(listener, app).await.unwrap();
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
     }
 
     /// Upgrades a connection to websocket. This creates message queues and tasks to forward messages between them.
