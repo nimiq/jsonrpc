@@ -15,7 +15,7 @@ keywords.workspace = true
 axum = { version = "0.8", features = ["ws"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
 async-trait = "0.1"
-blake2 = "0.10"
+blake2 = "0.11"
 futures = "0.3"
 log = "0.4"
 serde = "1.0"
