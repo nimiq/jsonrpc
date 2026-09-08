@@ -27,7 +27,7 @@ reqwest = { version = "0.13", optional = true, default-features = false, feature
 serde = "1.0"
 serde_json = "1.0"
 thiserror = "2.0"
-tokio = { version = "1.43", features = ["net", "sync"], optional = true }
+tokio = { version = "1.43", features = ["sync"], optional = true }
 tokio-tungstenite = { version = "0.30", optional = true, features =  ["native-tls"] }
 url = "2.3"
 wasm-bindgen = { version = "0.2", optional = true }
@@ -55,4 +55,4 @@ nimiq-jsonrpc-derive = { workspace = true }
 default = ["http-client", "websocket-client"]
 http-client = ["reqwest"]
 wasm-websocket-client = ["js-sys", "tokio", "wasm-bindgen", "wasm-bindgen-futures", "web-sys"]
-websocket-client = ["base64", "http", "tokio", "tokio/rt", "tokio-tungstenite"]
+websocket-client = ["base64", "http", "tokio", "tokio/net", "tokio/rt", "tokio-tungstenite"]
