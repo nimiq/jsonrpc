@@ -8,7 +8,10 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use futures::{sink::SinkExt, stream::StreamExt};
-use nimiq_jsonrpc_client::{websocket::WebsocketClient, Client};
+use nimiq_jsonrpc_client::{
+    websocket::{Config, WebsocketClient},
+    Client,
+};
 use nimiq_jsonrpc_core::SubscriptionId;
 use serde_json::{json, Value};
 use tokio::net::{TcpListener, TcpStream};
@@ -165,4 +168,79 @@ async fn connection_loss_is_observable_without_a_pending_request() {
 
     bounded(client.closed()).await;
     assert!(client.is_closed());
+}
+
+/// A connection that is silently blackholed - no close frame, no reset, nothing to observe - can
+/// only be detected by noticing that nothing comes back anymore.
+#[tokio::test(flavor = "multi_thread")]
+async fn blackholed_connection_is_detected_by_the_heartbeat() {
+    let url = serve(|mut ws| async move {
+        let request = next_request(&mut ws).await;
+        respond(&mut ws, &request["id"], json!(1)).await;
+
+        // Stop reading and writing, but hold the connection open: pings are never answered and
+        // the client never sees an error or an EOF.
+        std::future::pending::<()>().await;
+    })
+    .await;
+
+    let client = Arc::new(
+        WebsocketClient::new_with_config(
+            url,
+            None,
+            Config {
+                ping_interval: Some(Duration::from_millis(50)),
+                ping_timeout: Duration::from_millis(300),
+            },
+        )
+        .await
+        .unwrap(),
+    );
+
+    let subscription: u64 = client.send_request("subscribe", &()).await.unwrap();
+    let mut stream = client
+        .connect_stream::<u64>(SubscriptionId::Number(subscription))
+        .await;
+
+    let pending = tokio::spawn({
+        let client = Arc::clone(&client);
+        async move { client.send_request::<_, u64>("never_answered", &()).await }
+    });
+
+    assert_eq!(bounded(stream.next()).await, None);
+    assert!(bounded(pending).await.unwrap().is_err());
+    assert!(client.is_closed());
+}
+
+/// The heartbeat must not kill a connection that is merely idle. The server answers pings with
+/// pongs, which is enough to keep it alive.
+#[tokio::test(flavor = "multi_thread")]
+async fn heartbeat_keeps_an_idle_connection_alive() {
+    let url = serve(|mut ws| async move {
+        // Polling the stream is what makes tungstenite answer pings automatically.
+        loop {
+            let request = next_request(&mut ws).await;
+            respond(&mut ws, &request["id"], json!("alive")).await;
+        }
+    })
+    .await;
+
+    let client = WebsocketClient::new_with_config(
+        url,
+        None,
+        Config {
+            ping_interval: Some(Duration::from_millis(50)),
+            ping_timeout: Duration::from_millis(300),
+        },
+    )
+    .await
+    .unwrap();
+
+    // Stay completely idle for many ping intervals, well past the timeout.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    assert!(!client.is_closed());
+
+    let reply: String = client.send_request("still_alive", &()).await.unwrap();
+    assert_eq!(reply, "alive");
 }

@@ -56,4 +56,4 @@ tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "time"] }
 default = ["http-client", "websocket-client"]
 http-client = ["reqwest"]
 wasm-websocket-client = ["js-sys", "tokio", "wasm-bindgen", "wasm-bindgen-futures", "web-sys"]
-websocket-client = ["base64", "http", "tokio", "tokio/net", "tokio/rt", "tokio-tungstenite"]
+websocket-client = ["base64", "http", "tokio", "tokio/net", "tokio/rt", "tokio/time", "tokio-tungstenite"]
