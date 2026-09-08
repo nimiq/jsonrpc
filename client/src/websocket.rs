@@ -213,7 +213,15 @@ impl WebsocketClient {
         requests: &Arc<RwLock<RequestsMap>>,
         message: Message,
     ) -> Result<(), Error> {
-        // FIXME: This will also accept pings
+        // Control frames are answered by the protocol implementation itself and carry no JSON-RPC
+        // payload, so they must not be parsed as one.
+        if matches!(
+            message,
+            Message::Ping(_) | Message::Pong(_) | Message::Close(_)
+        ) {
+            return Ok(());
+        }
+
         let data = message.into_text()?;
 
         log::trace!("Received message: {:?}", data);
