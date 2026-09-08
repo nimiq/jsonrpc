@@ -57,6 +57,42 @@ async fn main() {
 }
 ```
 
+# Deprecating methods
+
+RPC methods can be marked with the standard Rust `#[deprecated]` attribute, in a `#[proxy]` trait
+or a `#[service]` impl (inherent or trait impl):
+
+```rust
+#[nimiq_jsonrpc_derive::proxy]
+#[async_trait]
+trait Foobar {
+    type Error;
+
+    #[deprecated(since = "1.1.0", note = "use `hello` instead")]
+    async fn hi(&self, name: String) -> Result<String, Self::Error>;
+    async fn hello(&self, name: String) -> Result<String, Self::Error>;
+}
+```
+
+This gives you reporting at three levels:
+
+ - **Rust callers** of the generated proxy get a compile-time deprecation warning (the standard
+   `#[deprecated]` behaviour).
+ - **The server** logs a warning (via the `log` crate) every time a deprecated method is dispatched,
+   so operators can see who is still calling it.
+ - **Any client** (in any language) can query the built-in `rpc.deprecatedMethods` method, which
+   returns the deprecated methods together with their metadata, e.g.
+   `{"hi": {"note": "use `hello` instead", "since": "1.1.0"}}`, and `rpc.methods` for the full list
+   of method names. This is also exposed in Rust through `Dispatcher::deprecated_methods()`.
+
+Both `#[deprecated = "note"]` and `#[deprecated(since = "...", note = "...")]` are supported; the
+note and version show up in the server log and in `rpc.deprecatedMethods`. One caveat: Rust itself
+rejects `#[deprecated]` on the methods of a trait impl (`#[service] impl MyInterface for
+MyService`), so there the macro consumes the attribute instead of leaving it in place — mark the
+method on the interface trait as well to give Rust callers the usual compile-time warning. (The
+reverse also holds: an attribute only on the interface trait is invisible to the macro, so it's
+the one on the trait impl that feeds the server-side reporting.)
+
 # TODO
 
  - [_] Share code between websocket clients.
