@@ -12,14 +12,14 @@ use async_trait::async_trait;
 use base64::Engine;
 use futures::{
     sink::SinkExt,
-    stream::{BoxStream, SplitSink, StreamExt},
+    stream::{self, BoxStream, SplitSink, StreamExt},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::{
     net::TcpStream,
-    sync::{mpsc, oneshot, RwLock},
+    sync::{mpsc, oneshot, watch, RwLock},
 };
 use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest,
@@ -61,6 +61,11 @@ pub enum Error {
     /// Error in the internal MPSC channel.
     #[error("{0}")]
     MpscSend(#[from] mpsc::error::SendError<SubscriptionMessage<Value>>),
+
+    /// The websocket connection is closed, either because it was closed explicitly, or because it
+    /// died. The client can't be used anymore and has to be re-created.
+    #[error("The websocket connection is closed")]
+    ConnectionClosed,
 }
 
 type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value>>>;
@@ -72,6 +77,7 @@ pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
     sender: RwLock<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>,
+    closed: Arc<watch::Sender<bool>>,
     next_id: AtomicU64,
 }
 
@@ -113,10 +119,12 @@ impl WebsocketClient {
 
         let streams = Arc::new(RwLock::new(HashMap::new()));
         let requests = Arc::new(RwLock::new(HashMap::new()));
+        let closed = Arc::new(watch::channel(false).0);
 
         {
             let streams = Arc::clone(&streams);
             let requests = Arc::clone(&requests);
+            let closed = Arc::clone(&closed);
 
             tokio::spawn(async move {
                 while let Some(message_result) = ws_rx.next().await {
@@ -133,6 +141,11 @@ impl WebsocketClient {
                         }
                     }
                 }
+
+                // The connection ended - either cleanly, or because it died. Propagate that to
+                // everyone waiting on it, instead of leaving them pending forever.
+                log::debug!("Websocket connection ended, closing streams and pending requests");
+                Self::teardown(&streams, &requests, &closed).await;
             });
         }
 
@@ -141,6 +154,7 @@ impl WebsocketClient {
             sender: RwLock::new(ws_tx),
             streams,
             requests,
+            closed,
         })
     }
 
@@ -152,6 +166,46 @@ impl WebsocketClient {
     ///
     pub async fn with_url(url: Url) -> Result<Self, Error> {
         Self::new(url, None).await
+    }
+
+    /// Returns whether the connection is closed, i.e. whether it either died or was closed with
+    /// [`Client::close`]. A closed client can't be used anymore and has to be re-created.
+    pub fn is_closed(&self) -> bool {
+        *self.closed.borrow()
+    }
+
+    /// Resolves as soon as the connection is closed, i.e. as soon as it either dies or is closed
+    /// with [`Client::close`]. Resolves immediately if it is closed already.
+    ///
+    /// This allows detecting a dead connection without waiting for a request or a subscription to
+    /// fail:
+    ///
+    /// ```no_run
+    /// # async fn example(client: nimiq_jsonrpc_client::websocket::WebsocketClient) {
+    /// client.closed().await;
+    /// // Reconnect here.
+    /// # }
+    /// ```
+    pub async fn closed(&self) {
+        // This only fails if the sender was dropped, which can't happen while `self` is alive.
+        let _ = self.closed.subscribe().wait_for(|closed| *closed).await;
+    }
+
+    /// Marks the connection as closed and drops every subscription and request sender. This ends
+    /// all subscription streams and makes all pending requests resolve with
+    /// [`Error::OneshotRecv`].
+    ///
+    /// The closed flag is set before the maps are cleared: a registration that is racing with this
+    /// either observes the flag (and is rejected), or holds the respective lock and is thus
+    /// removed by the clear that follows.
+    async fn teardown(
+        streams: &Arc<RwLock<StreamsMap>>,
+        requests: &Arc<RwLock<RequestsMap>>,
+        closed: &watch::Sender<bool>,
+    ) {
+        closed.send_replace(true);
+        requests.write().await.clear();
+        streams.write().await.clear();
     }
 
     async fn handle_websocket_message(
@@ -218,17 +272,28 @@ impl Client for WebsocketClient {
 
         log::debug!("Sending request: {:?}", request);
 
-        self.sender
-            .write()
-            .await
-            .send(Message::binary(serde_json::to_vec(&request)?))
-            .await?;
+        let message = Message::binary(serde_json::to_vec(&request)?);
 
-        let (tx, rx) = oneshot::channel();
+        // Register the request *before* sending it: the response can arrive as soon as the send
+        // completes, and the reader task discards responses it can't match to a pending request.
+        let rx = {
+            let mut requests = self.requests.write().await;
 
-        let mut requests = self.requests.write().await;
-        requests.insert(request_id, tx);
-        drop(requests);
+            if self.is_closed() {
+                return Err(Error::ConnectionClosed);
+            }
+
+            let (tx, rx) = oneshot::channel();
+            requests.insert(request_id, tx);
+
+            rx
+        };
+
+        if let Err(e) = self.sender.write().await.send(message).await {
+            // The request was never sent, so nothing will ever resolve it.
+            self.requests.write().await.remove(&request_id);
+            return Err(e.into());
+        }
 
         let response = rx.await?;
         log::debug!("Received response: {:?}", response);
@@ -242,7 +307,18 @@ impl Client for WebsocketClient {
     {
         let (tx, mut rx) = mpsc::channel(16);
 
-        self.streams.write().await.insert(id, tx);
+        {
+            let mut streams = self.streams.write().await;
+
+            if self.is_closed() {
+                // This can't return an error, so signal the dead connection with a stream that
+                // has already ended.
+                log::error!("Can't subscribe to {}: the connection is closed", id);
+                return stream::empty().boxed();
+            }
+
+            streams.insert(id, tx);
+        }
 
         let stream = async_stream::stream! {
             while let Some(message) = rx.recv().await {
@@ -254,6 +330,11 @@ impl Client for WebsocketClient {
     }
 
     async fn disconnect_stream(&self, id: SubscriptionId) -> Result<(), Self::Error> {
+        if self.is_closed() {
+            // The connection is gone, so all streams ended already.
+            return Ok(());
+        }
+
         if let Some(tx) = self.streams.write().await.remove(&id) {
             log::debug!("Closing stream of subscription ID: {}", id);
             drop(tx);
@@ -277,5 +358,9 @@ impl Client for WebsocketClient {
                 reason: "".into(),
             })))
             .await;
+
+        // Tear down right away instead of waiting for the peer to answer the close handshake -
+        // it might never do so, and pending requests and streams must not hang on that.
+        Self::teardown(&self.streams, &self.requests, &self.closed).await;
     }
 }
