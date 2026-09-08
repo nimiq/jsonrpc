@@ -4,8 +4,9 @@ use std::{
     str::FromStr,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -20,6 +21,7 @@ use thiserror::Error;
 use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot, watch, RwLock},
+    time::MissedTickBehavior,
 };
 use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest,
@@ -68,6 +70,30 @@ pub enum Error {
     ConnectionClosed,
 }
 
+/// Configuration for a [`WebsocketClient`].
+#[derive(Clone, Debug)]
+pub struct Config {
+    /// How often to send a websocket ping. `None` disables the heartbeat entirely.
+    ///
+    /// The heartbeat exists to notice connections that are silently blackholed - typically by a
+    /// firewall or a load balancer dropping an idle flow - which produce neither an error nor an
+    /// EOF and would otherwise never be detected.
+    pub ping_interval: Option<Duration>,
+
+    /// Consider the connection dead once nothing has been received for this long. Should be a
+    /// multiple of `ping_interval`, so that a single lost ping doesn't drop the connection.
+    pub ping_timeout: Duration,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            ping_interval: Some(Duration::from_secs(15)),
+            ping_timeout: Duration::from_secs(45),
+        }
+    }
+}
+
 type StreamsMap = HashMap<SubscriptionId, mpsc::Sender<SubscriptionMessage<Value>>>;
 type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
 
@@ -76,7 +102,7 @@ type RequestsMap = HashMap<u64, oneshot::Sender<Response>>;
 pub struct WebsocketClient {
     streams: Arc<RwLock<StreamsMap>>,
     requests: Arc<RwLock<RequestsMap>>,
-    sender: RwLock<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>,
+    sender: Arc<RwLock<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
     closed: Arc<watch::Sender<bool>>,
     next_id: AtomicU64,
 }
@@ -90,6 +116,22 @@ impl WebsocketClient {
     ///  - `basic_auth`: Credentials for HTTP basic auth.
     ///
     pub async fn new(url: Url, basic_auth: Option<Credentials>) -> Result<Self, Error> {
+        Self::new_with_config(url, basic_auth, Config::default()).await
+    }
+
+    /// Creates a new JSON-RPC websocket client with a custom configuration.
+    ///
+    /// # Arguments
+    ///
+    ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
+    ///  - `basic_auth`: Credentials for HTTP basic auth.
+    ///  - `config`: Heartbeat configuration, see [`Config`].
+    ///
+    pub async fn new_with_config(
+        url: Url,
+        basic_auth: Option<Credentials>,
+        config: Config,
+    ) -> Result<Self, Error> {
         let request = {
             let uri: http::Uri = url.to_string().parse().unwrap();
             let mut request = uri.into_client_request()?;
@@ -120,16 +162,24 @@ impl WebsocketClient {
         let streams = Arc::new(RwLock::new(HashMap::new()));
         let requests = Arc::new(RwLock::new(HashMap::new()));
         let closed = Arc::new(watch::channel(false).0);
+        let sender = Arc::new(RwLock::new(ws_tx));
+
+        // When the last message was received, used by the heartbeat to tell a live connection
+        // from a blackholed one.
+        let last_seen = Arc::new(Mutex::new(Instant::now()));
 
         {
             let streams = Arc::clone(&streams);
             let requests = Arc::clone(&requests);
             let closed = Arc::clone(&closed);
+            let last_seen = Arc::clone(&last_seen);
 
             tokio::spawn(async move {
                 while let Some(message_result) = ws_rx.next().await {
                     match message_result {
                         Ok(message) => {
+                            *last_seen.lock().unwrap() = Instant::now();
+
                             if let Err(e) =
                                 Self::handle_websocket_message(&streams, &requests, message).await
                             {
@@ -149,13 +199,75 @@ impl WebsocketClient {
             });
         }
 
+        if let Some(interval) = config.ping_interval {
+            Self::spawn_heartbeat(
+                Arc::clone(&sender),
+                Arc::clone(&streams),
+                Arc::clone(&requests),
+                Arc::clone(&closed),
+                last_seen,
+                interval,
+                config.ping_timeout,
+            );
+        }
+
         Ok(Self {
             next_id: AtomicU64::new(1),
-            sender: RwLock::new(ws_tx),
+            sender,
             streams,
             requests,
             closed,
         })
+    }
+
+    /// Sends a websocket ping every `interval`, and tears the connection down once nothing has
+    /// been received for `timeout`.
+    ///
+    /// A silently blackholed connection produces neither an error nor an EOF, so the reader task
+    /// waits on it forever and never gets to tear it down. Pings going unanswered is the only
+    /// symptom there is.
+    fn spawn_heartbeat(
+        sender: Arc<RwLock<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>>,
+        streams: Arc<RwLock<StreamsMap>>,
+        requests: Arc<RwLock<RequestsMap>>,
+        closed: Arc<watch::Sender<bool>>,
+        last_seen: Arc<Mutex<Instant>>,
+        interval: Duration,
+        timeout: Duration,
+    ) {
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+            let mut is_closed = closed.subscribe();
+
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {}
+                    // Stop as soon as the connection is torn down, so the task doesn't outlive
+                    // it and keep the sink alive.
+                    _ = is_closed.wait_for(|closed| *closed) => break,
+                }
+
+                let idle = last_seen.lock().unwrap().elapsed();
+                if idle > timeout {
+                    log::error!("Nothing received for {:?}, closing the connection", idle);
+                    Self::teardown(&streams, &requests, &closed).await;
+                    break;
+                }
+
+                if let Err(e) = sender
+                    .write()
+                    .await
+                    .send(Message::Ping(Default::default()))
+                    .await
+                {
+                    // Don't tear down here - either the read side reports the death, or the
+                    // idle check above does.
+                    log::error!("Failed to send ping: {}", e);
+                }
+            }
+        });
     }
 
     /// Creates a new JSON-RPC websocket client.
