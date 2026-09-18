@@ -50,6 +50,7 @@ features = [
 
 [dev-dependencies]
 nimiq-jsonrpc-derive = { workspace = true }
+tokio = { version = "1.43", features = ["macros", "rt-multi-thread", "time"] }
 
 [features]
 default = ["http-client", "websocket-client"]
