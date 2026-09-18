@@ -49,6 +49,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
     let mut match_arms = vec![];
     let mut name_match_arms = vec![];
     let mut method_names = vec![];
+    let mut deprecated_method_entries = vec![];
 
     let struct_path = match &*im.self_ty {
         Type::Path(path) => &path.path,
@@ -60,6 +61,11 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
 
     let rename_all: Option<RenameAll> = args.rename_all.as_ref().map(|r| r.parse().unwrap());
 
+    // Rust rejects `#[deprecated]` on the methods of a trait `impl` (`useless_deprecated`), so
+    // the macro has to consume the attribute there. Deprecations should then also be marked on
+    // the trait definition itself, where the attribute is legal and warns Rust callers.
+    let strip_deprecated = im.trait_.is_some();
+
     for item in &mut im.items {
         if let ImplItem::Fn(method) = item {
             let method = RpcMethod::new(
@@ -67,6 +73,7 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
                 &args_struct_prefix,
                 &mut method.attrs,
                 &rename_all,
+                strip_deprecated,
             );
 
             let match_arm = method.generate_dispatcher_match_arm();
@@ -79,14 +86,29 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
             match_arms.push(match_arm);
             name_match_arms.push(method.generate_dispatcher_method_matcher());
             method_names.push(quote! { #method_name_lit });
+
+            if let Some(entry) = method.generate_deprecation_entry() {
+                deprecated_method_entries.push(entry);
+            }
         }
     }
+
+    // The generated `dispatch` calls the service's methods, which may be `#[deprecated]` — either
+    // visibly to the macro, or via the interface trait of a trait impl (which the macro can't
+    // see). The `allow` silences that warning, but is only emitted when it can apply, so that
+    // services without deprecations keep compiling under a downstream `#![forbid(deprecated)]`.
+    let dispatch_allow = if im.trait_.is_some() || !deprecated_method_entries.is_empty() {
+        quote! { #[allow(deprecated)] }
+    } else {
+        quote! {}
+    };
 
     quote! {
         #(#args_structs)*
 
         #[::async_trait::async_trait]
         impl ::nimiq_jsonrpc_server::Dispatcher for #struct_path {
+            #dispatch_allow
             async fn dispatch(
                 &mut self,
                 request: ::nimiq_jsonrpc_core::Request,
@@ -110,6 +132,12 @@ fn impl_service(im: &mut ItemImpl, args: &ServiceMeta) -> TokenStream {
             fn method_names(&self) -> Vec<&str> {
                 vec![
                     #(#method_names),*
+                ]
+            }
+
+            fn deprecated_methods(&self) -> Vec<::nimiq_jsonrpc_server::MethodDeprecation<'_>> {
+                vec![
+                    #(#deprecated_method_entries),*
                 ]
             }
         }
