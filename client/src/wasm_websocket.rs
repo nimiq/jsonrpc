@@ -3,6 +3,12 @@
 //! # EXPERIMENTAL
 //!
 //! This is still experimental.
+//!
+//! # Origin allowlist
+//!
+//! The browser sends the page's origin with the websocket handshake, and `nimiq-jsonrpc-server`
+//! only accepts it if that origin is in its CORS configuration (`Cors::with_origins` or
+//! `Cors::with_any_origin`). Otherwise the handshake fails with `403 Forbidden`.
 
 use std::{
     cell::RefCell,

@@ -1,5 +1,6 @@
-//! This crate implements a JSON-RPC HTTP server using [warp](https://crates.io/crates/warp). It accepts POST requests
-//! at `/` and requests over websocket at `/ws`.
+//! This crate implements a JSON-RPC HTTP server using [axum](https://crates.io/crates/axum). It accepts POST requests
+//! at `/` and requests over websocket at `/ws`. Access from web pages is limited to the origins configured in
+//! [`Config::cors`].
 
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_doc_code_examples)]
@@ -9,7 +10,7 @@ use std::{
     error,
     fmt::{self, Debug},
     future::Future,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -21,7 +22,7 @@ use axum::{
     body::{Body, Bytes},
     extract::{ConnectInfo, DefaultBodyLimit, Query, State, WebSocketUpgrade},
     http::{
-        header::{AUTHORIZATION, CONTENT_TYPE},
+        header::{AUTHORIZATION, CONTENT_TYPE, ORIGIN},
         response::Builder,
         HeaderValue, Method, StatusCode,
     },
@@ -57,7 +58,7 @@ use nimiq_jsonrpc_core::{
 
 pub use axum::extract::ws::Message;
 pub use tokio::sync::Notify;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 /// Type defining a response and a possible notify handle used to terminate a subscription stream
 pub type ResponseAndSubScriptionNotifier = (Response, Option<Arc<Notify>>);
@@ -107,7 +108,20 @@ pub struct Config {
     /// Username and password for HTTP basic authentication.
     pub basic_auth: Option<Credentials>,
 
-    /// Cross-Origin Resource Sharing configuration
+    /// Cross-Origin Resource Sharing configuration.
+    ///
+    /// The configured origins do more than fill in the CORS response headers: they are enforced on
+    /// the request path. A request that carries an `Origin` header not in the list is rejected with
+    /// `403 Forbidden`, on both the HTTP endpoint and the websocket endpoint. Browsers open
+    /// websockets and send simple cross-origin POSTs without waiting for a CORS decision, so the
+    /// headers alone do not stop a web page from talking to the server. Preflight `OPTIONS`
+    /// requests are answered by the CORS layer itself and never reach the endpoints.
+    ///
+    /// Requests without an `Origin` header, which is what non-browser clients typically send, are
+    /// not affected. The header is trivially forged outside a browser, so this only keeps web pages
+    /// out; it is no substitute for [`Config::basic_auth`].
+    ///
+    /// `None` behaves like [`Cors::default`]: no browser origin is allowed.
     pub cors: Option<Cors>,
 }
 
@@ -181,7 +195,7 @@ async fn ip_whitelist_middleware<D: Dispatcher>(
         source_address
     } else {
         log::error!("Rejecting request with an unknown source address");
-        return StatusCode::FORBIDDEN.into_response();
+        return (StatusCode::FORBIDDEN, "source address unknown").into_response();
     };
 
     // A client connecting over IPv4 to a dual-stack socket is reported as an IPv4-mapped IPv6
@@ -190,51 +204,277 @@ async fn ip_whitelist_middleware<D: Dispatcher>(
         next.run(request).await
     } else {
         log::debug!("Rejecting request from {}: not whitelisted", source_address);
-        StatusCode::FORBIDDEN.into_response()
+        (StatusCode::FORBIDDEN, "source address not allowed").into_response()
     }
 }
 
+async fn origin_middleware<D: Dispatcher>(
+    State(state): State<Arc<Inner<D>>>,
+    request: axum::extract::Request,
+    next: Next,
+) -> HttpResponse {
+    // Only browsers send an `Origin` header, so a request without one has nothing to check
+    let origin = if let Some(origin) = request.headers().get(ORIGIN) {
+        origin
+    } else {
+        return next.run(request).await;
+    };
+
+    // The CORS headers alone do not stop a browser from opening a websocket or sending a simple
+    // POST, so the configured origins are enforced here as well. An absent CORS configuration
+    // allows no origin, matching what the default CORS headers tell the browser.
+    let allowed = state
+        .config
+        .cors
+        .as_ref()
+        .is_some_and(|cors| cors.allows_origin(origin));
+
+    if allowed {
+        next.run(request).await
+    } else {
+        log::debug!("Rejecting request from origin {:?}: not allowed", origin);
+        (StatusCode::FORBIDDEN, "origin not allowed").into_response()
+    }
+}
+
+/// The origins a browser may talk to the server from
 #[derive(Clone, Debug)]
+enum AllowedOrigins {
+    /// Every origin is allowed
+    Any,
+    /// Only the listed origins are allowed. An empty list allows no browser origin at all.
+    List(HashSet<HeaderValue>),
+}
+
+impl Default for AllowedOrigins {
+    fn default() -> Self {
+        Self::List(HashSet::new())
+    }
+}
+
 /// CORS configuration
-pub struct Cors(CorsLayer);
+///
+/// The origins configured here are used both for the CORS response headers and to reject requests
+/// from other origins, see [`Config::cors`].
+#[derive(Clone, Debug, Default)]
+pub struct Cors {
+    allowed_origins: AllowedOrigins,
+}
 
 impl Cors {
-    /// Create a new instance with `Content-Type` as mandatory header and `POST` as mandatory method.
+    /// Create a new instance that allows the `Authorization` and `Content-Type` request headers and
+    /// the `POST` method, and no origin at all.
+    ///
+    /// No origin is allowed until [`Cors::with_origins`] or [`Cors::with_any_origin`] is called.
     pub fn new() -> Self {
-        Self(
-            CorsLayer::new()
-                .allow_headers([AUTHORIZATION, CONTENT_TYPE])
-                .allow_methods([Method::POST]),
-        )
+        Self::default()
     }
 
-    /// Configure CORS to only allow specific origins.
+    /// Configure CORS to only allow specific origins. An empty list allows no origin.
+    ///
+    /// An entry is the origin of a web page, that is its `http(s)://` address without any path,
+    /// not the URL of this server. Entries are brought into the form browsers put in the `Origin`
+    /// header before they are compared: surrounding whitespace and trailing slashes are removed,
+    /// scheme and host are lowercased, IPv6 literals are compressed and the default port of the
+    /// scheme is dropped, so `HTTPS://Example.com:443/` matches `https://example.com`. An entry
+    /// that does not have the shape `scheme://host[:port]` is rejected, as are wildcard hosts such
+    /// as `https://*.example.com` and the opaque origin `null`, which browsers send for sandboxed
+    /// frames and `file://` pages and which would therefore let any web page in.
+    ///
+    /// A `*` entry allows every origin, like [`Cors::with_any_origin`].
+    ///
     /// Note that multiple calls to this method will override any previous origin-related calls.
-    pub fn with_origins(mut self, origins: Vec<String>) -> Self {
-        self.0 = self.0.allow_origin::<Vec<HeaderValue>>(
-            origins
-                .iter()
-                .map(|o| o.parse::<HeaderValue>().unwrap())
-                .collect(),
-        );
-        self
+    pub fn with_origins<I, S>(mut self, origins: I) -> Result<Self, InvalidOrigin>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut any = false;
+        let mut list = HashSet::new();
+        for entry in origins {
+            let entry = entry.as_ref();
+            if entry.trim() == "*" {
+                any = true;
+            } else {
+                list.insert(canonical_origin(entry)?);
+            }
+        }
+
+        self.allowed_origins = if any {
+            AllowedOrigins::Any
+        } else {
+            AllowedOrigins::List(list)
+        };
+        Ok(self)
     }
 
     /// Configure CORS to allow every origin. Also known as the `*` wildcard.
+    ///
+    /// This lets any web page talk to the server, including pages the operator merely has open in
+    /// a browser on the same machine, which is exactly what the origin check exists to prevent.
+    /// Only use it for a server that is protected by [`Config::basic_auth`] or that serves nothing
+    /// a stranger could misuse. [`Server::run`] logs a warning when it is in effect.
+    ///
     /// Note that multiple calls to this method will override any previous origin-related calls.
     pub fn with_any_origin(mut self) -> Self {
-        self.0 = self.0.allow_origin(Any);
+        self.allowed_origins = AllowedOrigins::Any;
         self
     }
 
+    /// Returns whether a request carrying the given `Origin` header may be served.
+    pub(crate) fn allows_origin(&self, origin: &HeaderValue) -> bool {
+        match &self.allowed_origins {
+            AllowedOrigins::Any => true,
+            AllowedOrigins::List(origins) => origins.contains(origin),
+        }
+    }
+
+    /// Returns whether every origin is allowed.
+    pub(crate) fn allows_any_origin(&self) -> bool {
+        matches!(self.allowed_origins, AllowedOrigins::Any)
+    }
+
+    /// Builds the CORS layer from the same origin list that the request path enforces, so the
+    /// headers the browser sees can never disagree with what the server accepts.
     pub(crate) fn into_layer(self) -> CorsLayer {
-        self.0
+        let allow_origin = match self.allowed_origins {
+            AllowedOrigins::Any => AllowOrigin::any(),
+            AllowedOrigins::List(origins) => AllowOrigin::list(origins),
+        };
+
+        CorsLayer::new()
+            .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+            .allow_methods([Method::POST])
+            .allow_origin(allow_origin)
     }
 }
 
-impl Default for Cors {
-    fn default() -> Self {
-        Self::new()
+/// An entry passed to [`Cors::with_origins`] that cannot be used as an origin.
+#[derive(Clone, Debug, Error)]
+#[error("invalid origin {entry:?}: {reason}")]
+pub struct InvalidOrigin {
+    entry: String,
+    reason: &'static str,
+}
+
+impl InvalidOrigin {
+    /// The offending entry, as it was passed in.
+    pub fn entry(&self) -> &str {
+        &self.entry
+    }
+}
+
+/// Brings a configured origin into the form a browser puts in the `Origin` header, so that an
+/// operator's `HTTPS://Example.com/` still matches `https://example.com`, or explains why the entry
+/// can never match anything.
+fn canonical_origin(entry: &str) -> Result<HeaderValue, InvalidOrigin> {
+    const SHAPE: &str = "expected `scheme://host[:port]`";
+    const PORT: &str = "port must be a number between 0 and 65535";
+    let invalid = |reason| InvalidOrigin {
+        entry: entry.to_owned(),
+        reason,
+    };
+
+    let origin = entry.trim().trim_end_matches('/').to_ascii_lowercase();
+    if origin == "null" {
+        return Err(invalid(
+            "the opaque origin `null` is sent by sandboxed frames and would let any web page in",
+        ));
+    }
+    if !origin.is_ascii() {
+        return Err(invalid(
+            "must be ASCII, use punycode for international host names",
+        ));
+    }
+    if origin.contains('*') {
+        return Err(invalid(
+            "wildcard hosts are not supported, list each origin",
+        ));
+    }
+
+    let (scheme, authority) = origin.split_once("://").ok_or_else(|| invalid(SHAPE))?;
+    let scheme_is_valid = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    // A host cannot contain URL delimiters, userinfo, percent-encoding (browsers decode it) or the
+    // other code points the URL standard forbids in hosts
+    let authority_is_valid = !authority.is_empty()
+        && !authority.contains(|c: char| {
+            c.is_whitespace()
+                || matches!(
+                    c,
+                    '/' | '?' | '#' | '@' | '%' | '<' | '>' | '\\' | '^' | '|'
+                )
+        });
+    if !scheme_is_valid || !authority_is_valid {
+        return Err(invalid(SHAPE));
+    }
+    if matches!(scheme, "ws" | "wss") {
+        return Err(invalid(
+            "an origin is the page's `http(s)://` address, not the server's websocket URL",
+        ));
+    }
+
+    // Split off the port. An IPv6 literal is bracketed, so the colons inside it are not a port.
+    let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
+        let (literal, rest) = rest.split_once(']').ok_or_else(|| invalid(SHAPE))?;
+        let address: Ipv6Addr = literal
+            .parse()
+            .map_err(|_| invalid("not a valid IPv6 address"))?;
+        let port = match rest.strip_prefix(':') {
+            Some(port) => Some(port),
+            None if rest.is_empty() => None,
+            None => return Err(invalid(SHAPE)),
+        };
+        (ipv6_host(address), port)
+    } else {
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        };
+        if host.is_empty() || host.contains([':', '[', ']']) {
+            return Err(invalid(SHAPE));
+        }
+        (host.to_owned(), port)
+    };
+
+    // Browsers leave out the default port of the scheme, so it is dropped here as well
+    let port = match port {
+        Some(port) if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) => {
+            Some(port.parse::<u16>().map_err(|_| invalid(PORT))?)
+        }
+        Some(_) => return Err(invalid(PORT)),
+        None => None,
+    };
+    let default_port = match scheme {
+        "http" => Some(80),
+        "https" => Some(443),
+        _ => None,
+    };
+    let origin = match port {
+        Some(port) if Some(port) != default_port => format!("{scheme}://{host}:{port}"),
+        _ => format!("{scheme}://{host}"),
+    };
+
+    origin
+        .parse::<HeaderValue>()
+        .map_err(|_| invalid("not a valid header value"))
+}
+
+/// Serializes an IPv6 address the way the URL standard does: compressed, lowercase and, for an
+/// IPv4-mapped address, in hex groups rather than the dotted form Rust prints.
+fn ipv6_host(address: Ipv6Addr) -> String {
+    match address.to_ipv4_mapped() {
+        Some(mapped) => {
+            let [a, b, c, d] = mapped.octets();
+            format!(
+                "[::ffff:{:x}:{:x}]",
+                u16::from_be_bytes([a, b]),
+                u16::from_be_bytes([c, d])
+            )
+        }
+        None => format!("[{address}]"),
     }
 }
 
@@ -338,6 +578,16 @@ impl<D: Dispatcher> Server<D> {
 
     /// Runs the server forever.
     pub async fn run(&self) {
+        if self
+            .inner
+            .config
+            .cors
+            .as_ref()
+            .is_some_and(Cors::allows_any_origin)
+        {
+            log::warn!("CORS allows every origin: any web page can talk to this server");
+        }
+
         let inner = Arc::clone(&self.inner);
         let http_router = Router::new().route(
             "/",
@@ -378,7 +628,12 @@ impl<D: Dispatcher> Server<D> {
                 Arc::clone(&self.inner),
                 basic_auth_middleware,
             ))
-            // Applied last so that it wraps the basic auth check and runs before it
+            // Each layer wraps the ones added before it, so the checks run in reverse order: IP
+            // whitelist first, then origin, then basic auth
+            .route_layer(axum::middleware::from_fn_with_state(
+                Arc::clone(&self.inner),
+                origin_middleware,
+            ))
             .route_layer(axum::middleware::from_fn_with_state(
                 Arc::clone(&self.inner),
                 ip_whitelist_middleware,
