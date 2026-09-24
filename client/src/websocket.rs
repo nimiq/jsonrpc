@@ -141,6 +141,10 @@ impl Drop for RequestGuard<'_> {
 
 /// A websocket JSON-RPC client.
 ///
+/// Dropping the client closes the connection: all subscription streams end and all pending
+/// requests fail, even the streams that were handed out by [`Client::connect_stream`]. Unlike
+/// [`Client::close`], dropping can't send a close frame, so the peer sees the connection drop
+/// without a close handshake.
 pub struct WebsocketClient {
     shared: Arc<SharedConnectionState>,
     sender: RwLock<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>,
@@ -256,6 +260,14 @@ impl WebsocketClient {
             .subscribe()
             .wait_for(|closed| *closed)
             .await;
+    }
+
+    /// Tears the connection down and stops the reader task. The reader has nothing left to
+    /// deliver to afterwards, and the peer may never close the connection, so stopping it is the
+    /// only way to release the socket.
+    fn shutdown(&self) {
+        self.shared.teardown();
+        self.reader.abort();
     }
 
     async fn handle_websocket_message(
@@ -407,12 +419,9 @@ impl Client for WebsocketClient {
 
     /// Close the websocket connection
     async fn close(&self) {
-        // Tear down before anything that can stall: sending the close frame below blocks on a
-        // full write buffer, and pending requests and streams must not hang on that. The reader
-        // has nothing left to deliver to afterwards, and the peer may never answer the close
-        // handshake anyway, so stop it rather than leaving it around until the peer goes away.
-        self.shared.teardown();
-        self.reader.abort();
+        // Shut down before anything that can stall: sending the close frame below blocks on a
+        // full write buffer, and pending requests and streams must not hang on that.
+        self.shutdown();
 
         // Try to send the close message
         // We don't do anything if it fails
@@ -425,5 +434,11 @@ impl Client for WebsocketClient {
                 reason: "".into(),
             })))
             .await;
+    }
+}
+
+impl Drop for WebsocketClient {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
