@@ -254,3 +254,32 @@ async fn close_returns_while_the_reader_is_stuck_on_a_full_stream() {
     bounded(client.close()).await;
     assert!(client.is_closed());
 }
+
+/// Dropping the client must release the connection even if the peer never closes it, and must
+/// end the streams the client handed out, which would otherwise outlive it.
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_the_client_releases_the_connection() {
+    let (released_tx, released_rx) = oneshot::channel();
+
+    let url = serve(|mut ws| async move {
+        let request = next_request(&mut ws).await;
+        respond(&mut ws, &request["id"], json!(1)).await;
+
+        // Never close from this side: the connection only ends if the client releases it.
+        while let Some(Ok(_)) = ws.next().await {}
+        released_tx.send(()).unwrap();
+    })
+    .await;
+
+    let client = WebsocketClient::with_url(url).await.unwrap();
+
+    let subscription: u64 = client.send_request("subscribe", &()).await.unwrap();
+    let mut stream = client
+        .connect_stream::<u64>(SubscriptionId::Number(subscription))
+        .await;
+
+    drop(client);
+
+    assert_eq!(bounded(stream.next()).await, None);
+    bounded(released_rx).await.unwrap();
+}
