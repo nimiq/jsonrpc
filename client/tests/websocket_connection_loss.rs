@@ -59,6 +59,17 @@ async fn notify(ws: &mut WebSocketStream<TcpStream>, subscription: u64, result: 
         .unwrap();
 }
 
+/// Answers the subscribe call, then waits for the client's next call before answering it too.
+/// The client makes that call only once it connected the stream, so that notifications sent
+/// after this returns can't arrive before there is a stream to deliver them to.
+async fn accept_subscription(ws: &mut WebSocketStream<TcpStream>) {
+    let request = next_request(ws).await;
+    respond(ws, &request["id"], json!(1)).await;
+
+    let request = next_request(ws).await;
+    respond(ws, &request["id"], json!(true)).await;
+}
+
 /// Binds a server on a random port and hands each accepted connection to `handler`.
 async fn serve<F, Fut>(handler: F) -> Url
 where
@@ -181,8 +192,7 @@ async fn connection_loss_is_observable_without_a_pending_request() {
 #[tokio::test(flavor = "multi_thread")]
 async fn malformed_notification_does_not_kill_the_reader() {
     let url = serve(|mut ws| async move {
-        let request = next_request(&mut ws).await;
-        respond(&mut ws, &request["id"], json!(1)).await;
+        accept_subscription(&mut ws).await;
 
         let malformed =
             json!({ "jsonrpc": "2.0", "method": "notification", "params": { "nope": true } });
@@ -200,6 +210,7 @@ async fn malformed_notification_does_not_kill_the_reader() {
     let mut stream = client
         .connect_stream::<u64>(SubscriptionId::Number(subscription))
         .await;
+    let _: bool = client.send_request("stream_connected", &()).await.unwrap();
 
     assert_eq!(bounded(stream.next()).await, Some(42));
     assert_eq!(bounded(stream.next()).await, None);
@@ -213,8 +224,7 @@ async fn close_returns_while_the_reader_is_stuck_on_a_full_stream() {
     let (sent_tx, sent_rx) = oneshot::channel();
 
     let url = serve(|mut ws| async move {
-        let request = next_request(&mut ws).await;
-        respond(&mut ws, &request["id"], json!(1)).await;
+        accept_subscription(&mut ws).await;
 
         // More than the stream's channel can buffer.
         for i in 0..32 {
@@ -232,6 +242,7 @@ async fn close_returns_while_the_reader_is_stuck_on_a_full_stream() {
     let mut stream = client
         .connect_stream::<u64>(SubscriptionId::Number(subscription))
         .await;
+    let _: bool = client.send_request("stream_connected", &()).await.unwrap();
 
     // Prove the notifications flow, then leave the stream unpolled and give the reader time to
     // park on its full channel. The sleep only affects how reliably a regression is detected:
