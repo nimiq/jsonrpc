@@ -29,6 +29,7 @@ jobs:
 
   test:
     runs-on: ubuntu-26.04
+    timeout-minutes: 20
 
     steps:
     - name: "Free up disk space"
